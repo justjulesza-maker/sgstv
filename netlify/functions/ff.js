@@ -352,7 +352,7 @@ const actions = {
     if (buf.length < 64) fail(400, 'bad_image');
     if (buf.length > 3.5 * 1024 * 1024) fail(400, 'image_too_large');
     const ext = sniffImage(buf);
-    if (!ext) fail(400, 'bad_image'); // PNG, JPEG or WebP only (no SVG: it can carry script)
+    if (!ext) fail(400, 'bad_image'); // PNG, JPEG, WebP or a font file only (no SVG: it can carry script)
     const key = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 24) + '.' + ext;
     deps.blobs(ctx.event);
     await deps.store().set(key, buf, { metadata: { by: ctx.uid, at: Date.now(), kind: String(b.kind || '').slice(0, 20) } });
@@ -404,6 +404,11 @@ function sniffImage(b) {
   if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'png';
   if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'jpg';
   if (b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP') return 'webp';
+  const sig = b.toString('ascii', 0, 4);
+  if (sig === 'wOF2') return 'woff2';
+  if (sig === 'wOFF') return 'woff';
+  if (sig === 'OTTO') return 'otf';
+  if ((b[0] === 0 && b[1] === 1 && b[2] === 0 && b[3] === 0) || sig === 'true') return 'ttf';
   return null;
 }
 function cleanId(s) { s = String(s || ''); if (!/^[A-Za-z0-9_-]{1,128}$/.test(s)) fail(400, 'bad_id'); return s; }

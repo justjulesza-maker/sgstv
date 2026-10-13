@@ -38,7 +38,7 @@
     already_unlocked: 'You already have this.', phone_required: 'Add a phone number so we can arrange your prize.',
     locked: 'This one is locked.', retry: 'Something changed — please try again.', server_not_configured: 'Server not configured yet (missing Netlify env vars).',
     bad_private_key: 'Server key problem: FIREBASE_PRIVATE_KEY on Netlify is not a valid key.',
-    image_too_large: 'That image is still too big after compressing — try a smaller one.', bad_image: 'That file isn’t a usable image.', not_admin: 'Admins only.',
+    image_too_large: 'That image is still too big after compressing — try a smaller one.', bad_image: 'That file isn’t a usable image or font (PNG, JPG, WebP, WOFF2, WOFF, TTF, OTF).', not_admin: 'Admins only.',
     bad_client_email_or_key: 'Server key problem: FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY don’t match.',
   };
   FF.errText = (e) => (ERRORS[e && e.code] || (e && e.message) || 'Something went wrong.') + (e && e.detail ? ' — ' + e.detail : '');
@@ -83,6 +83,7 @@
     } catch (e) { console.warn('site config', e); }
     try { const r = await FF.db.doc('config/rewards').get(); FF.rules = r.exists ? r.data() : {}; } catch (e) { FF.rules = {}; }
     const s = document.documentElement.style;
+    applyFonts();
     if (FF.site.bg) s.setProperty('--bg', FF.site.bg);
     if (FF.site.brand) s.setProperty('--brand', FF.site.brand);
     if (FF.site.accent) s.setProperty('--accent', FF.site.accent);
@@ -91,6 +92,32 @@
       s.setProperty('--surface-2', `color-mix(in srgb, ${FF.site.bg} 70%, #ffffff 14%)`);
     }
   }
+
+  // Licensed fonts uploaded in the admin override the free stand-ins.
+  const FONT_SLOTS = { fontDisplayUrl: ['FF Display', '--display', "Georgia, serif"], fontHeadingUrl: ['FF Heading', '--heading', 'system-ui, sans-serif'], fontBodyUrl: ['FF Body', '--body', 'system-ui, sans-serif'] };
+  const FORMATS = { woff2: 'woff2', woff: 'woff', ttf: 'truetype', otf: 'opentype' };
+  function applyFonts() {
+    let css = '';
+    for (const k of Object.keys(FONT_SLOTS)) {
+      const url = FF.site[k]; if (!url) continue;
+      const [fam, v, fallback] = FONT_SLOTS[k];
+      const ext = (/\.(woff2|woff|ttf|otf)(\?|$)/i.exec(url) || [])[1];
+      const safe = String(url).replace(/["\\\n]/g, '');
+      css += `@font-face{font-family:"${fam}";src:url("${safe}")${ext ? ` format("${FORMATS[ext.toLowerCase()]}")` : ''};font-weight:100 900;font-style:normal;font-display:swap}`;
+      document.documentElement.style.setProperty(v, `"${fam}", ${fallback}`);
+    }
+    if (!css) return;
+    let st = document.getElementById('ff-fonts');
+    if (!st) { st = document.createElement('style'); st.id = 'ff-fonts'; document.head.appendChild(st); }
+    st.textContent = css;
+  }
+
+  // Raw file upload (fonts) — no resizing.
+  FF.uploadFile = async (file, kind) => {
+    if (file.size > 3 * 1024 * 1024) throw new Error('Font file is over 3 MB — use the .woff2 version.');
+    const data = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.readAsDataURL(file); });
+    return (await FF.call('upload', { data, kind })).url;
+  };
 
   // ---------- chrome ----------
   function renderHeader() {

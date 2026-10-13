@@ -42,6 +42,11 @@ const toLocal = (v) => { const t = FF.ms(v); if (!t) return ''; const d = new Da
 function fieldHtml(f, val) {
   const id = 'f_' + f.k, cls = f.full ? 'full' : '';
   const hint = f.hint ? `<div class="hint">${f.hint}</div>` : '';
+  if (f.t === 'font') return `<div class="${cls}"><label>${esc(f.l)}</label><div class="img-field">
+    <span class="prev font-prev" id="pv_${f.k}" style="${val ? `font-family:'${f.fam}'` : ''}">Aa</span>
+    <input type="text" id="${id}" value="${esc(val || '')}" placeholder="Using free stand-in: ${esc(f.standin)}">
+    <button type="button" class="btn ghost small font-btn" data-k="${f.k}">Upload</button>
+    <button type="button" class="btn ghost small" onclick="document.getElementById('${id}').value=''">Clear</button></div>${hint}</div>`;
   if (f.t === 'image') return `<div class="${cls}"><label>${esc(f.l)}</label><div class="img-field">
     <span class="prev ${f.kind === 'bg' ? 'bg' : ''}" id="pv_${f.k}" style="${val ? `background-image:url('${esc(val)}')` : ''}"></span>
     <input type="text" id="${id}" value="${esc(val || '')}" placeholder="Upload, or paste an https link">
@@ -88,6 +93,19 @@ document.addEventListener('input', (e) => {
   const pv = $('pv_' + i.id.slice(2)); if (pv) pv.style.backgroundImage = i.value ? `url('${i.value.replace(/'/g, '')}')` : '';
 });
 
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('.font-btn'); if (!b) return;
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.woff2,.woff,.ttf,.otf,font/*';
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0]; if (!f) return;
+    const label = b.textContent; b.disabled = true; b.textContent = 'Uploading…';
+    try { $('f_' + b.dataset.k).value = await FF.uploadFile(f, 'font'); FF.toast('Font uploaded — Save, then reload to see it'); }
+    catch (err) { FF.toast(FF.errText(err)); }
+    finally { b.disabled = false; b.textContent = label; }
+  };
+  inp.click();
+});
+
 // ---------- schemas ----------
 const SITE = [
   { k: 'name', l: 'Site name' }, { k: 'tagline', l: 'Tagline' },
@@ -97,6 +115,9 @@ const SITE = [
   { k: 'bg', l: 'Background colour', t: 'color' }, { k: 'brand', l: 'Primary accent', t: 'color' },
   { k: 'accent', l: 'Secondary accent', t: 'color' }, { k: 'pointsName', l: 'Points name', hint: 'e.g. Fish Points' },
   { k: 'featuredVideoId', l: 'Featured video ID (home hero)', hint: 'Live videos always take the hero.' },
+  { k: 'fontDisplayUrl', l: 'Headline font (Moret)', t: 'font', fam: 'FF Display', standin: 'Fraunces', full: true, hint: 'Big titles. Upload .woff2 (best), .woff, .ttf or .otf. Only upload fonts with a web licence that covers this site.' },
+  { k: 'fontHeadingUrl', l: 'Heading & button font (Gilroy)', t: 'font', fam: 'FF Heading', standin: 'Urbanist', full: true },
+  { k: 'fontBodyUrl', l: 'Body text font (Franklin Pro)', t: 'font', fam: 'FF Body', standin: 'Libre Franklin', full: true, hint: 'Use a Regular/Book weight for body text — Thin weights are hard to read on phones.' },
   { k: 'baseEmojis', l: 'Free reaction emojis', t: 'list', hint: 'Space-separated.' },
   { k: 'legalLine', l: 'Legal line (footer)', full: true },
   { k: 'footerText', l: 'Footer text', full: true },
