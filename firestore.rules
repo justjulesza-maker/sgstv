@@ -1,0 +1,62 @@
+rules_version = '2';
+// Flying Fish — Surprisingly Good Sets
+// Paste into Firebase console → Firestore Database → Rules → Publish.
+// Points, balances, ledgers, leaderboard and redemptions are written ONLY by the
+// server function (service account bypasses these rules). Browsers cannot touch them.
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function signedIn() { return request.auth != null; }
+    function isAdmin() { return signedIn() && exists(/databases/$(db)/documents/admins/$(request.auth.uid)); }
+    function me() { return get(/databases/$(db)/documents/users/$(request.auth.uid)).data; }
+    function verified() { return signedIn() && exists(/databases/$(db)/documents/users/$(request.auth.uid)) && me().verified == true; }
+
+    match /config/{doc}   { allow read: if true; allow write: if isAdmin(); }
+    match /channels/{id}  { allow read: if true; allow write: if isAdmin(); }
+    match /rewards/{id}   { allow read: if true; allow write: if isAdmin(); }
+    match /leaderboard/{uid} { allow read: if true; allow write: if false; }
+    match /videos_private/{id} { allow read, write: if isAdmin(); }
+
+    match /videos/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+
+      match /chat/{msg} {
+        allow read: if true;
+        allow create: if verified()
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'text', 'ts'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.name == me().name
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 300
+          && request.resource.data.ts == request.time;
+        allow delete: if isAdmin();
+      }
+      match /reactions/{r} {
+        allow read: if true;
+        allow create: if verified()
+          && request.resource.data.keys().hasOnly(['uid', 'emoji', 'ts'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.emoji is string && request.resource.data.emoji.size() <= 16
+          && request.resource.data.ts == request.time;
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if false;
+      match /{sub=**} {
+        allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+        allow write: if false;
+      }
+    }
+
+    match /redemptions/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow update: if isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'fulfilledAt']);
+      allow create, delete: if false;
+    }
+
+    match /admins/{uid} { allow read: if signedIn() && request.auth.uid == uid; allow write: if false; }
+  }
+}

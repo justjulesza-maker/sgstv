@@ -1,0 +1,6 @@
+.DS_Store
+# never commit service-account keys
+*firebase-adminsdk*.json
+*service-account*.json
+.netlify/
+node_modules/

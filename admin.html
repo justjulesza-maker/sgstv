@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 24px 0 18px; }
+  .tabs button { padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-weight: 700; }
+  .tabs button.on { background: var(--brand); color: #111; border-color: transparent; }
+  .panel { display: grid; gap: 20px; grid-template-columns: 1fr; }
+  @media (min-width: 1000px) { .panel.split { grid-template-columns: 1fr 420px; } }
+  .box { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+  .box h3 { font-size: 20px; margin-bottom: 4px; }
+  .fields { display: grid; gap: 0 14px; grid-template-columns: 1fr 1fr; }
+  .fields .full { grid-column: 1 / -1; }
+  .fields .check { margin-top: 30px; }
+  .list-row { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .list-row img { width: 72px; height: 40px; object-fit: cover; border-radius: 6px; background: var(--surface-2); }
+  .list-row .grow { flex: 1; min-width: 0; }
+  .list-row .grow div:first-child { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag { font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 5px; background: var(--surface-2); margin-left: 6px; }
+  .tag.live { background: var(--live); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  code { background: var(--surface-2); padding: 2px 6px; border-radius: 5px; }
+</style>
+</head>
+<body data-page="admin">
+<header id="ff-header"></header>
+<main class="wrap" id="main"><div class="empty" style="margin-top:40px">Loading…</div></main>
+<footer id="ff-footer"></footer>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="/config.js"></script>
+<script src="/app.js"></script>
+<script>
+const esc = FF.esc, $ = (id) => document.getElementById(id), db = () => FF.db;
+const toLocal = (v) => { const t = FF.ms(v); if (!t) return ''; const d = new Date(t - new Date().getTimezoneOffset() * 60000); return d.toISOString().slice(0, 16); };
+
+// ---------- generic form ----------
+function fieldHtml(f, val) {
+  const id = 'f_' + f.k, cls = f.full ? 'full' : '';
+  const hint = f.hint ? `<div class="hint">${f.hint}</div>` : '';
+  if (f.t === 'check') return `<label class="check ${cls}"><input type="checkbox" id="${id}" ${val ? 'checked' : ''}> <span>${esc(f.l)}</span></label>`;
+  if (f.t === 'textarea') return `<div class="${cls}"><label>${esc(f.l)}</label><textarea id="${id}" rows="3">${esc(val || '')}</textarea>${hint}</div>`;
+  if (f.t === 'select') return `<div class="${cls}"><label>${esc(f.l)}</label><select id="${id}">${f.opts.map(o => `<option value="${esc(o[0])}" ${o[0] === val ? 'selected' : ''}>${esc(o[1])}</option>`).join('')}</select>${hint}</div>`;
+  const type = f.t === 'number' ? 'number' : f.t === 'color' ? 'color' : f.t === 'datetime' ? 'datetime-local' : 'text';
+  const v = f.t === 'datetime' ? toLocal(val) : f.t === 'list' ? (val || []).join(' ') : val == null ? '' : val;
+  return `<div class="${cls}"><label>${esc(f.l)}</label><input type="${type}" id="${id}" value="${esc(v)}" ${f.t === 'number' ? 'step="any"' : ''}>${hint}</div>`;
+}
+function readFields(fields) {
+  const o = {};
+  fields.forEach(f => {
+    const el = $('f_' + f.k); if (!el) return;
+    if (f.t === 'check') o[f.k] = el.checked;
+    else if (f.t === 'number') o[f.k] = el.value === '' ? null : Number(el.value);
+    else if (f.t === 'datetime') o[f.k] = el.value ? new Date(el.value) : null;
+    else if (f.t === 'list') o[f.k] = el.value.split(/[\s,]+/).filter(Boolean);
+    else o[f.k] = el.value.trim();
+  });
+  return o;
+}
+
+// ---------- schemas ----------
+const SITE = [
+  { k: 'name', l: 'Site name' }, { k: 'tagline', l: 'Tagline' },
+  { k: 'logoUrl', l: 'Main logo URL', full: true, hint: 'Upload to Bunny Storage (or any https host) and paste the link.' },
+  { k: 'bg', l: 'Background colour', t: 'color' }, { k: 'brand', l: 'Primary accent', t: 'color' },
+  { k: 'accent', l: 'Secondary accent', t: 'color' }, { k: 'pointsName', l: 'Points name', hint: 'e.g. Fish Points' },
+  { k: 'featuredVideoId', l: 'Featured video ID (home hero)', hint: 'Live videos always take the hero.' },
+  { k: 'baseEmojis', l: 'Free reaction emojis', t: 'list', hint: 'Space-separated.' },
+  { k: 'legalLine', l: 'Legal line (footer)', full: true },
+  { k: 'footerText', l: 'Footer text', full: true },
+  { k: 'privacyUrl', l: 'Privacy policy URL' }, { k: 'termsUrl', l: 'Rewards terms URL' },
+];
+const RULES = [
+  { k: 'redemptionsOpen', l: 'Redemptions open', t: 'check' }, { k: 'prizesEnabled', l: 'Prize redemptions enabled (needs signed-off T&Cs)', t: 'check' },
+  { k: 'welcomeBonus', l: 'Welcome bonus', t: 'number' }, { k: 'dailyCap', l: 'Max points per person per day', t: 'number' },
+  { k: 'vodPerMin', l: 'VOD points / minute', t: 'number' }, { k: 'vodCapPerVideoDay', l: 'VOD minute cap per set per day', t: 'number' },
+  { k: 'livePerMin', l: 'Live points / minute', t: 'number' }, { k: 'liveCapPerVideoDay', l: 'Live minute cap per show per day', t: 'number' },
+  { k: 'liveAttendBonus', l: 'Live attendance bonus', t: 'number' }, { k: 'liveAttendAfterMin', l: '…after this many live minutes', t: 'number' },
+  { k: 'chatPoints', l: 'Points per chat message', t: 'number' }, { k: 'chatCapDay', l: 'Rewarded messages per day', t: 'number' },
+  { k: 'chatMinGapSec', l: 'Seconds between rewarded messages', t: 'number' }, { k: 'reactPoints', l: 'Points per reaction', t: 'number' },
+  { k: 'reactCapDay', l: 'Rewarded reactions per day', t: 'number' }, { k: 'reactMinGapSec', l: 'Seconds between rewarded reactions', t: 'number' },
+  { k: 'dailyBase', l: 'Daily visit points', t: 'number' }, { k: 'streakStep', l: 'Extra per streak day', t: 'number' },
+  { k: 'streakMax', l: 'Streak bonus stops growing at day', t: 'number' },
+];
+const CHANNEL = [
+  { k: 'name', l: 'Show name' }, { k: 'slug', l: 'URL slug', hint: 'e.g. sgs-durban → /channel.html?c=sgs-durban' },
+  { k: 'tagline', l: 'Tagline', full: true }, { k: 'description', l: 'Description', t: 'textarea', full: true },
+  { k: 'logoUrl', l: 'Show logo URL', full: true },
+  { k: 'color', l: 'Show colour', t: 'color' }, { k: 'accent', l: 'Accent override (optional)', t: 'text', hint: 'Hex, blank = site accent' },
+  { k: 'order', l: 'Order', t: 'number' }, { k: 'active', l: 'Visible on site', t: 'check' },
+];
+const SOURCE_TYPES = [['bunny', 'Bunny Stream (VOD)'], ['cloudflare', 'Cloudflare Stream (live or VOD)'], ['youtube', 'YouTube'], ['vimeo', 'Vimeo']];
+const VIDEO = (chs) => [
+  { k: 'title', l: 'Title', full: true },
+  { k: 'channelId', l: 'Show', t: 'select', opts: chs.map(c => [c.id, c.name]) },
+  { k: 'type', l: 'Source', t: 'select', opts: SOURCE_TYPES },
+  { k: 'sourceId', l: 'Video ID', hint: 'Bunny video GUID · Cloudflare video/live input UID (32 hex) · YouTube ID · Vimeo number' },
+  { k: 'bunnyLibraryId', l: 'Bunny library ID', hint: 'Bunny only' },
+  { k: 'cfCustomerCode', l: 'Cloudflare customer code (optional)', hint: 'The xyz in customer-xyz.cloudflarestream.com' },
+  { k: 'durationMin', l: 'Duration (min)', t: 'number' },
+  { k: 'description', l: 'Description', t: 'textarea', full: true },
+  { k: 'thumb', l: 'Thumbnail URL', full: true, hint: 'YouTube fills this in automatically if left blank.' },
+  { k: 'scheduledAt', l: 'Scheduled start (live)', t: 'datetime' }, { k: 'publishedAt', l: 'Published date', t: 'datetime' },
+  { k: 'published', l: 'Published', t: 'check' }, { k: 'isLive', l: 'LIVE NOW', t: 'check' },
+  { k: 'locked', l: 'Fan exclusive (unlock with points)', t: 'check' }, { k: 'unlockKey', l: 'Unlock key', hint: 'Must match a reward’s unlock key, e.g. vault:sgs-1' },
+];
+const REWARD = [
+  { k: 'title', l: 'Title', full: true }, { k: 'description', l: 'Description', t: 'textarea', full: true },
+  { k: 'type', l: 'Type', t: 'select', opts: [['unlock', 'Unlock (in-platform)'], ['prize', 'Prize (physical/real-world)']] },
+  { k: 'cost', l: 'Cost (points)', t: 'number' },
+  { k: 'unlockKey', l: 'Unlock key', hint: '<code>pack:KEY</code> for emoji packs, or any key used on locked videos' },
+  { k: 'stock', l: 'Stock (blank = unlimited)', t: 'number' },
+  { k: 'image', l: 'Image URL', full: true }, { k: 'active', l: 'Visible', t: 'check' },
+];
+
+// ---------- tabs ----------
+let channels = [];
+const TABS = { site: tabSite, rules: tabRules, channels: tabChannels, videos: tabVideos, rewards: tabRewards, redemptions: tabRedemptions, users: tabUsers };
+function shell() {
+  $('main').innerHTML = `<div class="tabs" id="tabs">${['site', 'rules', 'channels', 'videos', 'rewards', 'redemptions', 'users'].map(t => `<button data-t="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div><div id="tab"></div>`;
+  $('tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) go(b.dataset.t); };
+  go(location.hash.slice(1) || 'videos');
+}
+async function go(t) {
+  if (!TABS[t]) t = 'videos';
+  history.replaceState(null, '', '#' + t);
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+  $('tab').innerHTML = '<div class="muted">Loading…</div>';
+  channels = (await db().collection('channels').get()).docs.map(d => Object.assign({ id: d.id }, d.data())).sort((a, b) => (a.order || 0) - (b.order || 0));
+  await TABS[t]();
+}
+
+async function tabSite() {
+  const d = (await db().doc('config/site').get()).data() || {};
+  const v = Object.assign({}, FF.site, d);
+  $('tab').innerHTML = `<div class="box"><h3>Look & feel</h3><div class="fields">${SITE.map(f => fieldHtml(f, v[f.k])).join('')}</div>
+    <h3 style="margin-top:22px">Emoji packs</h3><div class="hint">JSON list. Unlock with a reward whose key is <code>pack:KEY</code>.</div>
+    <textarea id="packs" rows="5">${esc(JSON.stringify(v.emojiPacks || [{ key: 'gold', name: 'Gold', emojis: ['🏆', '💎', '👑'] }], null, 1))}</textarea>
+    <div class="row" style="margin-top:14px"><button class="btn" id="save">Save</button></div></div>`;
+  $('save').onclick = async () => {
+    let packs; try { packs = JSON.parse($('packs').value || '[]'); } catch (e) { FF.toast('Emoji packs: invalid JSON'); return; }
+    await db().doc('config/site').set(Object.assign(readFields(SITE), { emojiPacks: packs }), { merge: true });
+    FF.toast('Saved');
+  };
+}
+async function tabRules() {
+  const d = (await db().doc('config/rewards').get()).data() || {};
+  const v = Object.assign({ welcomeBonus: 50, vodPerMin: 1, livePerMin: 2, vodCapPerVideoDay: 30, liveCapPerVideoDay: 120, liveAttendBonus: 25, liveAttendAfterMin: 5,
+    chatPoints: 2, chatCapDay: 10, chatMinGapSec: 20, reactPoints: 1, reactCapDay: 10, reactMinGapSec: 5, dailyBase: 10, streakStep: 2, streakMax: 7, dailyCap: 400,
+    redemptionsOpen: false, prizesEnabled: false }, d);
+  $('tab').innerHTML = `<div class="box"><h3>Earning rules</h3><p class="muted">The server enforces these. Changes apply within a minute.</p>
+    <div class="fields">${RULES.map(f => fieldHtml(f, v[f.k])).join('')}</div>
+    <div class="row" style="margin-top:14px"><button class="btn" id="save">Save</button></div></div>`;
+  $('save').onclick = async () => {
+    const o = readFields(RULES);
+    for (const k in o) if (o[k] === null) delete o[k];
+    if (o.prizesEnabled && !confirm('Prize redemptions create a promotional competition. Only enable once the rewards T&Cs are signed off and linked. Continue?')) return;
+    await db().doc('config/rewards').set(o, { merge: true }); FF.toast('Saved');
+  };
+}
+
+// list + editor pattern
+function listEditor({ title, items, row, fields, load, save, del, blank }) {
+  $('tab').innerHTML = `<div class="panel split"><div class="box"><div class="section-head" style="margin-bottom:6px"><h3>${title}</h3><button class="btn small" id="new">+ New</button></div><div id="list"></div></div>
+    <div class="box" id="ed"><div class="muted">Pick an item or create a new one.</div></div></div>`;
+  $('list').innerHTML = items.map(it => `<div class="list-row" data-id="${it.id}" style="cursor:pointer">${row(it)}</div>`).join('') || '<div class="muted">Nothing yet.</div>';
+  const open = async (it) => {
+    const v = it ? await load(it) : Object.assign({}, blank);
+    $('ed').innerHTML = `<h3>${it ? 'Edit' : 'New'}</h3>${it ? `<div class="hint">ID: <code>${esc(it.id)}</code></div>` : ''}<div class="fields">${fields.map(f => fieldHtml(f, v[f.k])).join('')}</div>
+      <div class="row" style="margin-top:14px"><button class="btn" id="sv">Save</button>${it ? '<button class="btn ghost" id="dl">Delete</button>' : ''}</div>`;
+    $('sv').onclick = async () => { try { await save(it ? it.id : null, readFields(fields), v); FF.toast('Saved'); go(location.hash.slice(1)); } catch (e) { FF.toast(e.message); } };
+    if (it) $('dl').onclick = async () => { if (confirm('Delete permanently?')) { await del(it.id); go(location.hash.slice(1)); } };
+  };
+  $('new').onclick = () => open(null);
+  $('list').onclick = (e) => { const r = e.target.closest('.list-row'); if (r) open(items.find(x => x.id === r.dataset.id)); };
+}
+
+async function tabChannels() {
+  listEditor({
+    title: 'Shows / channels', items: channels, fields: CHANNEL, blank: { active: true, color: '#1d4e7a', order: channels.length + 1 },
+    row: (c) => `<img src="${esc(c.logoUrl || '')}" alt="" style="object-fit:contain;background:${esc(c.color || '#222')}"><div class="grow"><div>${esc(c.name)}</div><div class="muted">/${esc(c.slug || c.id)}${c.active ? '' : ' · hidden'}</div></div>`,
+    load: async (c) => c,
+    save: async (id, o) => {
+      if (!o.name) throw new Error('Name required');
+      o.slug = (o.slug || o.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      if (channels.some(c => c.slug === o.slug && c.id !== id)) throw new Error('Slug already used');
+      id ? await db().doc('channels/' + id).set(o, { merge: true }) : await db().collection('channels').add(o);
+    },
+    del: (id) => db().doc('channels/' + id).delete(),
+  });
+}
+
+async function tabVideos() {
+  if (!channels.length) { $('tab').innerHTML = '<div class="empty">Create a show (Channels tab) first.</div>'; return; }
+  const items = (await db().collection('videos').get()).docs.map(d => Object.assign({ id: d.id }, d.data()))
+    .sort((a, b) => (b.isLive - a.isLive) || FF.ms(b.publishedAt) - FF.ms(a.publishedAt));
+  const chName = Object.fromEntries(channels.map(c => [c.id, c.name]));
+  listEditor({
+    title: 'Videos & live shows', items, fields: VIDEO(channels), blank: { type: 'bunny', channelId: channels[0].id, published: false, publishedAt: Date.now() },
+    row: (v) => `<img src="${esc(v.thumb || (v.type === 'youtube' && v.sourceId ? 'https://i.ytimg.com/vi/' + v.sourceId + '/default.jpg' : ''))}" alt=""><div class="grow"><div>${esc(v.title)}${v.isLive ? '<span class="tag live">LIVE</span>' : ''}${v.published ? '' : '<span class="tag">DRAFT</span>'}${v.locked ? '<span class="tag">🔒</span>' : ''}</div><div class="muted">${esc(chName[v.channelId] || '?')} · ${esc(v.type)}</div></div><a class="btn ghost small" href="/watch.html?v=${v.id}" target="_blank" onclick="event.stopPropagation()">View</a>`,
+    load: async (v) => {
+      if (!v.locked) return v;
+      const p = await db().doc('videos_private/' + v.id).get();
+      return Object.assign({}, v, p.exists ? p.data() : {});
+    },
+    save: async (id, o) => {
+      if (!o.title) throw new Error('Title required');
+      if (!o.sourceId && !o.scheduledAt) throw new Error('Video ID required (or set a scheduled start for an upcoming live show)');
+      if (o.type === 'bunny' && o.sourceId && !o.bunnyLibraryId) throw new Error('Bunny library ID required');
+      if (o.type === 'cloudflare' && o.sourceId && !/^[0-9a-f]{32}$/i.test(o.sourceId)) throw new Error('Cloudflare ID must be the 32-character video / live input UID — not the stream key');
+      if (o.locked && !o.unlockKey) throw new Error('Locked videos need an unlock key');
+      if (!o.publishedAt) o.publishedAt = new Date();
+      const ref = id ? db().doc('videos/' + id) : db().collection('videos').doc();
+      const src = { type: o.type, sourceId: o.sourceId, bunnyLibraryId: o.bunnyLibraryId, cfCustomerCode: o.cfCustomerCode };
+      const batch = db().batch();
+      if (o.locked) { // real source only in the admin-only collection
+        batch.set(db().doc('videos_private/' + ref.id), src);
+        Object.assign(o, { sourceId: '', bunnyLibraryId: '', cfCustomerCode: '' });
+      } else batch.delete(db().doc('videos_private/' + ref.id));
+      batch.set(ref, o, { merge: true });
+      await batch.commit();
+    },
+    del: async (id) => { await db().doc('videos_private/' + id).delete(); await db().doc('videos/' + id).delete(); },
+  });
+}
+
+async function tabRewards() {
+  const items = (await db().collection('rewards').get()).docs.map(d => Object.assign({ id: d.id }, d.data())).sort((a, b) => (a.cost || 0) - (b.cost || 0));
+  listEditor({
+    title: 'Reward catalogue', items, fields: REWARD, blank: { type: 'unlock', active: true },
+    row: (w) => `<img src="${esc(w.image || '')}" alt=""><div class="grow"><div>${esc(w.title)}<span class="tag">${esc(w.type)}</span>${w.active ? '' : '<span class="tag">HIDDEN</span>'}</div><div class="muted">${FF.fmt(w.cost)} pts${typeof w.stock === 'number' ? ' · ' + w.stock + ' left' : ''}</div></div>`,
+    load: async (w) => w,
+    save: async (id, o) => {
+      if (!o.title || !(o.cost > 0)) throw new Error('Title and a positive cost required');
+      if (o.type === 'unlock' && !o.unlockKey) throw new Error('Unlock rewards need an unlock key');
+      if (o.stock === null) { if (id) o.stock = firebase.firestore.FieldValue.delete(); else delete o.stock; }
+      id ? await db().doc('rewards/' + id).set(o, { merge: true }) : await db().collection('rewards').add(o);
+    },
+    del: (id) => db().doc('rewards/' + id).delete(),
+  });
+}
+
+async function tabRedemptions() {
+  const s = await db().collection('redemptions').orderBy('at', 'desc').limit(300).get();
+  const rows = s.docs.map(d => Object.assign({ id: d.id }, d.data()));
+  $('tab').innerHTML = `<div class="box"><h3>Redemptions</h3><table><tr><th>When</th><th>Fan</th><th>Reward</th><th>Contact</th><th>Status</th><th></th></tr>
+    ${rows.map(r => `<tr><td>${esc(FF.when(r.at))}</td><td>${esc(r.name)}</td><td>${esc(r.title)} <span class="tag">${esc(r.type)}</span></td>
+      <td>${r.contact ? esc(r.contact.email) + '<br>' + esc(r.contact.phone) : ''}</td><td>${esc(r.status)}</td>
+      <td>${r.status === 'pending' ? `<button class="btn small" data-id="${r.id}">Mark sent</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">None yet.</td></tr>'}</table></div>`;
+  $('tab').onclick = async (e) => { const b = e.target.closest('button[data-id]'); if (b) { await db().doc('redemptions/' + b.dataset.id).update({ status: 'fulfilled', fulfilledAt: new Date() }); tabRedemptions(); } };
+}
+
+async function tabUsers() {
+  const s = await db().collection('users').orderBy('lifetime', 'desc').limit(1000).get();
+  const users = s.docs.map(d => d.data());
+  $('tab').innerHTML = `<div class="box"><div class="section-head"><h3>Registered fans (${users.length}${users.length === 1000 ? '+' : ''})</h3><button class="btn small" id="csv">Export CSV</button></div>
+    <table><tr><th>Name</th><th>Email</th><th>Points</th><th>All-time</th><th>Streak</th><th>Marketing opt-in</th><th>Joined</th><th></th></tr>
+    ${users.map(u => `<tr><td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>${FF.fmt(u.points)}</td><td>${FF.fmt(u.lifetime)}</td><td>${u.streak || 0}</td><td>${u.marketing ? 'Yes' : 'No'}</td><td>${esc(FF.when(u.createdAt))}</td>
+      <td><button class="btn ghost small" data-uid="${esc(u.uid)}">Adjust</button></td></tr>`).join('')}</table></div>`;
+  $('csv').onclick = () => {
+    const q = (x) => `"${String(x == null ? '' : x).replace(/"/g, '""')}"`;
+    const csv = ['name,email,points,lifetime,streak,marketing_opt_in,joined'].concat(users.map(u => [u.name, u.email, u.points, u.lifetime, u.streak, u.marketing ? 'yes' : 'no', new Date(FF.ms(u.createdAt)).toISOString()].map(q).join(','))).join('\n');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'fans.csv'; a.click();
+  };
+  $('tab').onclick = async (e) => {
+    const b = e.target.closest('button[data-uid]'); if (!b) return;
+    const amount = prompt('Points to add (use a minus sign to remove):'); if (!amount) return;
+    const note = prompt('Reason (shown in their activity):') || '';
+    try { await FF.call('adjust', { uid: b.dataset.uid, amount: Number(amount), note }); FF.toast('Adjusted'); tabUsers(); } catch (err) { FF.toast(FF.errText(err)); }
+  };
+}
+
+FF.onReady(async () => {
+  const check = async () => {
+    if (!FF.user) {
+      $('main').innerHTML = `<div class="box" style="max-width:480px;margin:60px auto"><h3>Admin sign-in</h3><p class="muted">Use your admin email — we’ll send a link.</p><button class="btn" id="in">Sign in</button></div>`;
+      $('in').onclick = () => FF.signIn('Admin access.');
+      return;
+    }
+    const a = await db().doc('admins/' + FF.user.uid).get().catch(() => null);
+    if (!a || !a.exists) {
+      $('main').innerHTML = `<div class="box" style="max-width:560px;margin:60px auto"><h3>Not an admin yet</h3>
+        <p class="muted">In Firebase console → Firestore, create a document <code>admins/${esc(FF.user.uid)}</code> with a field <code>email</code> = <code>${esc(FF.user.email)}</code>, then reload.</p></div>`;
+      return;
+    }
+    FF.isAdmin = true; shell();
+  };
+  await check();
+  document.addEventListener('ff:auth', check);
+});
+FF.boot();
+</script>
+</body>
+</html>

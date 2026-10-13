@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Watch</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+  .layout { display: grid; gap: 20px; grid-template-columns: 1fr; margin-top: 20px; }
+  @media (min-width: 1000px) { .layout { grid-template-columns: minmax(0, 1fr) 360px; } }
+  .stage { position: relative; aspect-ratio: 16/9; background: #000; border-radius: 16px; overflow: hidden; }
+  .stage .overlay { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 20px; background: linear-gradient(135deg, var(--c, var(--surface-2)), #000); }
+  .floaters { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 5; }
+  .floater { position: absolute; bottom: 8%; font-size: 30px; animation: up 2.6s ease-out forwards; }
+  @keyframes up { to { transform: translateY(-260px) scale(1.25); opacity: 0; } }
+  .meta { margin-top: 14px; }
+  .meta h1 { font-size: clamp(24px, 3.4vw, 36px); }
+  .meta .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 8px; color: var(--muted); }
+  .ch-link { display: inline-flex; gap: 8px; align-items: center; font-weight: 700; color: var(--text); }
+  .ch-link img { height: 28px; }
+  .earnbar { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 14px; }
+  .earnbar .meter { flex: 1; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+  .earnbar .meter i { display: block; height: 100%; width: 0; background: var(--brand); transition: width .4s; }
+  .reacts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+  .reacts button { font-size: 22px; padding: 6px 10px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); cursor: pointer; transition: transform .1s; }
+  .reacts button:active { transform: scale(.88); }
+  .reacts button.locked { opacity: .35; }
+  .chat { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; height: 620px; max-height: 80vh; }
+  .chat .head { padding: 14px 16px; border-bottom: 1px solid var(--line); font-weight: 800; display: flex; justify-content: space-between; }
+  .chat .msgs { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { font-size: 14px; line-height: 1.4; word-wrap: break-word; }
+  .msg b { color: var(--accent); margin-right: 6px; }
+  .msg.me b { color: var(--brand); }
+  .msg .del { float: right; background: none; border: 0; color: var(--muted); cursor: pointer; }
+  .chat form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
+  .chat form input { flex: 1; }
+</style>
+</head>
+<body data-page="watch">
+<header id="ff-header"></header>
+<main class="wrap">
+  <div class="layout">
+    <div>
+      <div class="stage" id="stage"><div class="overlay">Loading…</div></div>
+      <div class="meta" id="meta"></div>
+      <div class="earnbar" id="earnbar"><span id="earn-text">Sign in to earn while you watch</span><span class="meter"><i id="earn-meter"></i></span></div>
+      <div class="reacts" id="reacts"></div>
+    </div>
+    <aside class="chat">
+      <div class="head"><span id="chat-title">Chat</span><span class="muted" id="chat-count"></span></div>
+      <div class="msgs" id="msgs"></div>
+      <form id="chat-form"><input id="chat-input" maxlength="300" placeholder="Say something…" autocomplete="off"><button class="btn small">Send</button></form>
+    </aside>
+  </div>
+  <section class="section"><div class="section-head"><h2>Up next</h2></div><div class="grid" id="next"></div></section>
+</main>
+<footer id="ff-footer"></footer>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="/config.js"></script>
+<script src="/app.js"></script>
+<script src="/player.js"></script>
+<script>
+FF.onReady(async () => {
+  const esc = FF.esc, $ = (id) => document.getElementById(id);
+  const vid = FF.qs('v');
+  const vdoc = vid && await FF.db.doc('videos/' + vid).get();
+  if (!vdoc || !vdoc.exists || !vdoc.data().published) { $('stage').innerHTML = '<div class="overlay">Video not found.</div>'; return; }
+  let video = Object.assign({ id: vdoc.id }, vdoc.data());
+  const chDoc = await FF.db.doc('channels/' + video.channelId).get();
+  const ch = chDoc.exists ? Object.assign({ id: chDoc.id }, chDoc.data()) : { name: '' };
+  document.title = `${video.title} · ${FF.site.name}`;
+  $('stage').style.setProperty('--c', ch.color || '');
+  if (ch.accent) document.documentElement.style.setProperty('--brand', ch.accent);
+  const pn = FF.site.pointsName;
+
+  function renderMeta() {
+    $('meta').innerHTML = `<h1>${esc(video.title)}</h1>
+      <div class="row"><a class="ch-link" href="/channel.html?c=${encodeURIComponent(ch.slug || ch.id)}">${ch.logoUrl ? `<img src="${esc(ch.logoUrl)}" alt="">` : ''}${esc(ch.name)}</a>
+      ${video.isLive ? '<span class="badge live" style="position:static">● LIVE</span>' : ''}</div>
+      ${video.description ? `<p class="muted">${esc(video.description)}</p>` : ''}`;
+    $('chat-title').textContent = video.isLive ? 'Live chat' : 'Comments';
+  }
+  renderMeta();
+
+  // ----- player -----
+  let player = null, mounted = false;
+  async function mount() {
+    if (mounted) return;
+    const stage = $('stage');
+    const soon = video.scheduledAt && FF.ms(video.scheduledAt) > Date.now() && !video.isLive;
+    if (soon) { stage.innerHTML = `<div class="overlay"><div><h2>Starts ${esc(FF.when(video.scheduledAt))}</h2><p class="muted">Chat is open — come back when it goes live.</p></div></div>`; return; }
+    let src = video;
+    if (video.locked) {
+      const has = FF.profile && (FF.profile.unlocks || []).includes(video.unlockKey);
+      if (!has) {
+        stage.innerHTML = `<div class="overlay"><div><h2>🔒 Fan exclusive</h2><p class="muted">Unlock this set with ${esc(pn)}.</p><a class="btn" href="/rewards.html">See rewards</a></div></div>`;
+        return;
+      }
+      try { src = (await FF.call('source', { videoId: video.id })).source; }
+      catch (e) { stage.innerHTML = `<div class="overlay">${esc(FF.errText(e))}</div>`; return; }
+    }
+    mounted = true;
+    stage.innerHTML = '<div class="floaters" id="floaters"></div>';
+    const holder = document.createElement('div'); holder.style.cssText = 'position:absolute;inset:0'; stage.prepend(holder);
+    player = FF.mountPlayer(holder, src);
+  }
+  await mount();
+  document.addEventListener('ff:auth', mount);
+  document.addEventListener('ff:profile', mount);
+  // Pick up "go live" / "end" changes made in admin without a reload.
+  FF.db.doc('videos/' + video.id).onSnapshot((d) => {
+    if (!d.exists) return;
+    const was = video.isLive; video = Object.assign({ id: d.id }, d.data());
+    if (was !== video.isLive) { renderMeta(); if (!mounted) mount(); }
+  });
+
+  // ----- earning heartbeat -----
+  function setEarn(text, pct) { $('earn-text').textContent = text; $('earn-meter').style.width = (pct || 0) + '%'; }
+  function idleText() {
+    if (!FF.user) return `Sign in to earn ${pn} while you watch`;
+    if (!FF.profile || !FF.profile.verified) return 'Finish sign-up to start earning';
+    return `Press play to earn ${pn}`;
+  }
+  setEarn(idleText());
+  document.addEventListener('ff:auth', () => setEarn(idleText()));
+  $('earnbar').onclick = () => { if (!FF.profile || !FF.profile.verified) FF.requireProfile(); };
+  setInterval(async () => {
+    if (!player || !FF.profile || !FF.profile.verified) return;
+    const state = player.state(), visible = document.visibilityState === 'visible';
+    if (!visible || state === 'idle' || state === 'paused') { setEarn(visible ? `Paused — press play to keep earning` : 'Come back to this tab to keep earning'); return; }
+    try {
+      const r = await FF.call('heartbeat', { videoId: video.id, state, visible });
+      if (r.awarded) {
+        if (r.reason === 'live_attend') FF.earned(r.awarded, 'you showed up live!');
+        setEarn(`Earning ${pn} · ${r.minutes}/${r.cap} min today on this set`, Math.min(100, r.minutes / r.cap * 100));
+      } else if (r.reason === 'video_cap') setEarn(`Maxed out on this set today — try another one`, 100);
+      else if (r.reason === 'daily_cap') setEarn(`Daily ${pn} limit reached — see you tomorrow`, 100);
+      else if (r.reason === 'too_soon') setEarn(`Earning on another tab or set`);
+    } catch (e) { console.warn('heartbeat', e); }
+  }, 60000);
+
+  // ----- reactions -----
+  const unlocked = () => new Set(FF.profile ? FF.profile.unlocks || [] : []);
+  function renderReacts() {
+    const u = unlocked();
+    let html = FF.site.baseEmojis.map(e => `<button data-e="${esc(e)}">${esc(e)}</button>`).join('');
+    (FF.site.emojiPacks || []).forEach(p => {
+      const ok = u.has('pack:' + p.key);
+      html += (p.emojis || []).map(e => `<button data-e="${esc(e)}" ${ok ? '' : `class="locked" data-pack="${esc(p.name || p.key)}"`} title="${ok ? '' : 'Unlock in Rewards'}">${esc(e)}</button>`).join('');
+    });
+    $('reacts').innerHTML = html;
+  }
+  renderReacts();
+  document.addEventListener('ff:profile', renderReacts);
+  let lastReact = 0;
+  $('reacts').onclick = async (ev) => {
+    const b = ev.target.closest('button'); if (!b) return;
+    if (b.dataset.pack) { FF.toast(`Unlock the ${b.dataset.pack} pack in Rewards`); return; }
+    if (!FF.requireProfile('Sign in to react.')) return;
+    if (Date.now() - lastReact < 1500) return; lastReact = Date.now();
+    await FF.db.collection(`videos/${video.id}/reactions`).add({ uid: FF.user.uid, emoji: b.dataset.e, ts: FF.ts() });
+    FF.call('react', { videoId: video.id }).then(r => FF.earned(r.awarded)).catch(() => {});
+  };
+  const t0 = new Date();
+  FF.db.collection(`videos/${video.id}/reactions`).where('ts', '>', t0).orderBy('ts', 'desc').limit(30).onSnapshot((s) => {
+    s.docChanges().forEach((c) => {
+      if (c.type !== 'added') return;
+      const f = document.getElementById('floaters'); if (!f) return;
+      const el = document.createElement('span'); el.className = 'floater'; el.textContent = c.doc.data().emoji;
+      el.style.left = (8 + Math.random() * 84) + '%'; f.appendChild(el); setTimeout(() => el.remove(), 2700);
+    });
+  });
+
+  // ----- chat -----
+  const msgs = $('msgs');
+  FF.db.collection(`videos/${video.id}/chat`).orderBy('ts', 'desc').limit(100).onSnapshot((s) => {
+    const nearBottom = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
+    const me = FF.user && FF.user.uid;
+    msgs.innerHTML = s.docs.slice().reverse().map(d => {
+      const m = d.data();
+      return `<div class="msg ${m.uid === me ? 'me' : ''}">${FF.isAdmin ? `<button class="del" data-id="${d.id}" title="Remove">✕</button>` : ''}<b>${esc(m.name)}</b>${esc(m.text)}</div>`;
+    }).join('') || '<div class="muted">No messages yet — start it off.</div>';
+    $('chat-count').textContent = s.size ? s.size + (s.size === 100 ? '+' : '') : '';
+    if (nearBottom) msgs.scrollTop = msgs.scrollHeight;
+  });
+  msgs.onclick = (e) => { const b = e.target.closest('.del'); if (b) FF.db.doc(`videos/${video.id}/chat/${b.dataset.id}`).delete(); };
+  $('chat-input').onfocus = () => { if (!FF.profile || !FF.profile.verified) { $('chat-input').blur(); FF.requireProfile('Sign in to join the chat.'); } };
+  $('chat-form').onsubmit = async (e) => {
+    e.preventDefault();
+    if (!FF.requireProfile('Sign in to join the chat.')) return;
+    const text = $('chat-input').value.trim(); if (!text) return;
+    $('chat-input').value = '';
+    try {
+      const ref = await FF.db.collection(`videos/${video.id}/chat`).add({ uid: FF.user.uid, name: FF.profile.name, text, ts: FF.ts() });
+      FF.call('chat', { videoId: video.id, msgId: ref.id }).then(r => FF.earned(r.awarded)).catch(() => {});
+    } catch (err) { FF.toast('Message not sent — please try again.'); $('chat-input').value = text; }
+  };
+
+  // ----- up next -----
+  const more = (await FF.publishedVideos(video.channelId)).filter(v => v.id !== video.id).slice(0, 4);
+  $('next').innerHTML = more.map(v => FF.videoCard(v, ch)).join('') || '<div class="empty">More sets coming soon.</div>';
+});
+FF.boot();
+</script>
+</body>
+</html>

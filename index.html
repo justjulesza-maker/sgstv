@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Surprisingly Good Sets</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+  .hero { position: relative; border-radius: 22px; overflow: hidden; margin-top: 24px; min-height: 420px; display: flex; align-items: flex-end; background: var(--surface); }
+  .hero .bg { position: absolute; inset: 0; background-size: cover; background-position: center; }
+  .hero .bg::after { content: ''; position: absolute; inset: 0; background: linear-gradient(0deg, var(--bg) 4%, transparent 70%), linear-gradient(90deg, rgba(0,0,0,.55), transparent 70%); }
+  .hero .in { position: relative; padding: clamp(20px, 4vw, 44px); max-width: 720px; }
+  .hero .kicker { display: inline-flex; gap: 8px; align-items: center; font-weight: 800; letter-spacing: .08em; font-size: 13px; text-transform: uppercase; color: var(--brand); }
+  .hero .kicker.live { color: #fff; background: var(--live); padding: 4px 10px; border-radius: 6px; }
+  .hero h1 { font-size: clamp(34px, 6vw, 68px); margin: 12px 0 10px; }
+  .hero p { color: #d6e2ee; font-size: 18px; margin: 0 0 20px; }
+  .ch-card { position: relative; border-radius: 18px; overflow: hidden; aspect-ratio: 4/3; background: linear-gradient(150deg, var(--c), color-mix(in srgb, var(--c) 30%, var(--bg))); display: flex; flex-direction: column; justify-content: flex-end; padding: 18px; border: 1px solid var(--line); transition: transform .15s; }
+  .ch-card:hover { transform: translateY(-4px) rotate(-.4deg); }
+  .ch-card img { position: absolute; top: 18px; left: 18px; max-height: 42%; max-width: 60%; object-fit: contain; }
+  .ch-card .n { font-family: var(--display); font-weight: 800; font-size: 24px; line-height: 1.05; }
+  .ch-card .tg { color: rgba(255,255,255,.82); font-size: 14px; }
+  .ch-card .live-dot { position: absolute; top: 16px; right: 16px; left: auto; }
+  .earn { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
+  .earn div { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .earn b { display: block; font-family: var(--display); font-size: 26px; color: var(--brand); }
+  .split { display: grid; gap: 28px; grid-template-columns: 1fr; }
+  @media (min-width: 980px) { .split { grid-template-columns: 2fr 1fr; } }
+  .lb li { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .lb ol { list-style: none; padding: 0; margin: 0; counter-reset: r; }
+  .lb li::before { counter-increment: r; content: counter(r); width: 28px; color: var(--muted); font-weight: 700; }
+  .lb li span:first-of-type { flex: 1; }
+</style>
+</head>
+<body data-page="home">
+<header id="ff-header"></header>
+<main class="wrap">
+  <section class="hero" id="hero"><div class="in"><span class="kicker">Loading…</span></div></section>
+
+  <section class="section" id="channels">
+    <div class="section-head"><h2>The shows</h2></div>
+    <div class="grid" id="ch-grid"></div>
+  </section>
+
+  <div class="split">
+    <section class="section" style="margin-top:0">
+      <div class="section-head"><h2>Latest sets</h2></div>
+      <div class="grid" id="latest"></div>
+    </section>
+    <aside class="section lb" style="margin-top:0">
+      <div class="section-head"><h2>Top fans</h2><a class="muted" href="/rewards.html">All rewards →</a></div>
+      <ol id="lb"></ol>
+      <h3 style="margin:28px 0 12px">How to earn</h3>
+      <div class="earn" id="earn"></div>
+    </aside>
+  </div>
+</main>
+<footer id="ff-footer"></footer>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="/config.js"></script>
+<script src="/app.js"></script>
+<script>
+FF.onReady(async () => {
+  const esc = FF.esc;
+  document.title = FF.site.name;
+  const channels = await FF.loadChannels();
+  const byId = Object.fromEntries(channels.map(c => [c.id, c]));
+  const videos = (await FF.publishedVideos()).filter(v => byId[v.channelId]);
+  const liveIds = new Set(videos.filter(v => v.isLive).map(v => v.channelId));
+
+  // hero: live now > featured > latest
+  const hero = videos.find(v => v.isLive) || videos.find(v => v.id === FF.site.featuredVideoId) || videos[0];
+  const h = document.getElementById('hero');
+  if (hero) {
+    const ch = byId[hero.channelId] || {};
+    const bg = hero.heroImage || hero.thumb || (hero.type === 'youtube' ? `https://i.ytimg.com/vi/${encodeURIComponent(hero.sourceId)}/maxresdefault.jpg` : '');
+    h.innerHTML = `<div class="bg" style="${bg ? `background-image:url('${esc(bg)}')` : `background:linear-gradient(135deg,${esc(ch.color || '#15304d')},var(--bg))`}"></div>
+      <div class="in">${hero.isLive ? '<span class="kicker live">● Live now</span>' : `<span class="kicker">${esc(ch.name || 'Featured')}</span>`}
+      <h1>${esc(hero.title)}</h1><p>${esc(hero.description || FF.site.tagline)}</p>
+      <a class="btn" href="/watch.html?v=${encodeURIComponent(hero.id)}">${hero.isLive ? 'Watch live' : 'Watch now'} ▸</a></div>`;
+  } else {
+    h.innerHTML = `<div class="in"><h1>${esc(FF.site.name)}</h1><p>${esc(FF.site.tagline)}</p></div>`;
+  }
+
+  document.getElementById('ch-grid').innerHTML = channels.length ? channels.map(c => `
+    <a class="ch-card" style="--c:${esc(c.color || '#1d4e7a')}" href="/channel.html?c=${encodeURIComponent(c.slug || c.id)}">
+      ${c.logoUrl ? `<img src="${esc(c.logoUrl)}" alt="">` : ''}
+      ${liveIds.has(c.id) ? '<span class="badge live live-dot">● LIVE</span>' : ''}
+      <div class="n">${esc(c.name)}</div><div class="tg">${esc(c.tagline || '')}</div></a>`).join('')
+    : '<div class="empty">No shows yet — add channels in the admin.</div>';
+
+  document.getElementById('latest').innerHTML = videos.filter(v => !v.isLive).slice(0, 8).map(v => FF.videoCard(v, byId[v.channelId])).join('') || '<div class="empty">No sets published yet.</div>';
+
+  const lb = await FF.db.collection('leaderboard').orderBy('lifetime', 'desc').limit(5).get();
+  document.getElementById('lb').innerHTML = lb.docs.map(d => `<li><span>${esc(d.data().name)}</span><b>${FF.fmt(d.data().lifetime)}</b></li>`).join('') || '<li class="muted">Be the first on the board.</li>';
+
+  const r = Object.assign({ vodPerMin: 1, livePerMin: 2, chatPoints: 2, dailyBase: 10, liveAttendBonus: 25 }, FF.rules);
+  const pn = esc(FF.site.pointsName);
+  document.getElementById('earn').innerHTML = `
+    <div><b>${r.vodPerMin}/min</b>watching sets</div>
+    <div><b>${r.livePerMin}/min</b>watching live + ${r.liveAttendBonus} for showing up</div>
+    <div><b>+${r.chatPoints}</b>per chat message</div>
+    <div><b>+${r.dailyBase}</b>daily visit — streaks pay more</div>`;
+});
+FF.boot();
+</script>
+</body>
+</html>

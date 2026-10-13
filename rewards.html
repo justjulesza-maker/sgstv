@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rewards</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+  .bal { margin-top: 24px; border-radius: 22px; padding: clamp(22px, 4vw, 40px); background: radial-gradient(circle at 85% 20%, color-mix(in srgb, var(--brand) 35%, transparent), transparent 55%), var(--surface); border: 1px solid var(--line); display: grid; gap: 20px; grid-template-columns: 1fr; }
+  @media (min-width: 800px) { .bal { grid-template-columns: 1.4fr 1fr 1fr; align-items: end; } }
+  .bal .big { font-family: var(--display); font-weight: 800; font-size: clamp(48px, 8vw, 88px); line-height: .95; color: var(--brand); }
+  .bal .lbl { color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; font-size: 12px; }
+  .bal .mid { font-family: var(--display); font-size: 32px; font-weight: 800; }
+  .rw .body { display: flex; flex-direction: column; gap: 8px; height: 100%; }
+  .rw .cost { font-weight: 800; color: var(--brand); }
+  .rw .btn { margin-top: auto; align-self: flex-start; }
+  .rw .kind { font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+  .notice { margin-top: 16px; padding: 12px 16px; border-radius: 12px; border: 1px dashed var(--line); color: var(--muted); }
+  .two { display: grid; gap: 28px; grid-template-columns: 1fr; }
+  @media (min-width: 900px) { .two { grid-template-columns: 1fr 1fr; } }
+  td.num { text-align: right; font-weight: 700; }
+  td.neg { color: #ff8095; }
+</style>
+</head>
+<body data-page="rewards">
+<header id="ff-header"></header>
+<main class="wrap">
+  <section class="bal" id="bal"></section>
+  <div class="notice hidden" id="closed"></div>
+  <section class="section"><div class="section-head"><h2>Rewards</h2></div><div class="grid" id="catalogue"></div></section>
+  <div class="two">
+    <section><div class="section-head"><h2>Leaderboard</h2></div><table id="lb"></table></section>
+    <section id="mine" class="hidden"><div class="section-head"><h2>Your activity</h2></div><table id="ledger"></table></section>
+  </div>
+</main>
+<footer id="ff-footer"></footer>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="/config.js"></script>
+<script src="/app.js"></script>
+<script>
+FF.onReady(async () => {
+  const esc = FF.esc, $ = (id) => document.getElementById(id), pn = esc(FF.site.pointsName);
+  document.title = `Rewards · ${FF.site.name}`;
+  const R = () => Object.assign({ redemptionsOpen: false, prizesEnabled: false }, FF.rules);
+  const REASONS = { welcome: 'Welcome bonus', daily: 'Daily visit', watch: 'Watching', live_attend: 'Showed up live', chat: 'Chat', react: 'Reaction', redeem: 'Redeemed', admin: 'Adjustment' };
+
+  function renderBal() {
+    const p = FF.profile;
+    if (!p || !p.verified) {
+      $('bal').innerHTML = `<div><div class="lbl">${pn}</div><div class="big">Join in</div><p class="muted">Watch, chat and show up live to earn ${pn}, then spend them on fan exclusives and prizes.</p>
+        <button class="btn" id="join">Sign in to start earning</button></div>`;
+      $('join').onclick = () => FF.requireProfile();
+      return;
+    }
+    $('bal').innerHTML = `<div><div class="lbl">Your ${pn}</div><div class="big">${FF.fmt(p.points)}</div></div>
+      <div><div class="lbl">All-time earned</div><div class="mid">${FF.fmt(p.lifetime)}</div></div>
+      <div><div class="lbl">Daily streak</div><div class="mid">${p.streak || 0} 🔥</div></div>`;
+  }
+
+  let rewards = [];
+  async function loadRewards() {
+    const s = await FF.db.collection('rewards').where('active', '==', true).get();
+    rewards = s.docs.map(d => Object.assign({ id: d.id }, d.data())).sort((a, b) => (a.cost || 0) - (b.cost || 0));
+  }
+  function renderCatalogue() {
+    const r = R(), p = FF.profile;
+    const closed = !r.redemptionsOpen;
+    $('closed').classList.toggle('hidden', !closed);
+    $('closed').textContent = `Redemptions open soon — keep stacking ${FF.site.pointsName} in the meantime.`;
+    $('catalogue').innerHTML = rewards.map(w => {
+      const owned = w.type === 'unlock' && p && (p.unlocks || []).includes(w.unlockKey);
+      const prizeOff = w.type === 'prize' && !r.prizesEnabled;
+      const out = typeof w.stock === 'number' && w.stock <= 0;
+      const can = !closed && !prizeOff && !owned && !out && p && p.verified && p.points >= w.cost;
+      const label = owned ? 'Unlocked ✓' : out ? 'Out of stock' : prizeOff ? 'Coming soon' : closed ? 'Opens soon' : (p && p.points < w.cost) ? `Need ${FF.fmt(w.cost - p.points)} more` : 'Redeem';
+      return `<div class="card rw">${w.image ? `<div class="thumb"><img class="cover" src="${esc(w.image)}" alt="" loading="lazy"></div>` : ''}
+        <div class="body"><span class="kind">${w.type === 'prize' ? 'Prize' : 'Unlock'}${typeof w.stock === 'number' ? ` · ${w.stock} left` : ''}</span>
+        <div class="t">${esc(w.title)}</div><div class="s">${esc(w.description || '')}</div>
+        <div class="cost">${FF.fmt(w.cost)} ${pn}</div>
+        <button class="btn small" data-id="${w.id}" ${can ? '' : 'disabled'}>${label}</button></div></div>`;
+    }).join('') || '<div class="empty">Rewards are on the way.</div>';
+  }
+  $('catalogue').onclick = (e) => {
+    const b = e.target.closest('button[data-id]'); if (!b) return;
+    const w = rewards.find(x => x.id === b.dataset.id); if (!w) return;
+    const m = FF.modal(`<h3>Redeem ${esc(w.title)}?</h3>
+      <p class="muted">This uses ${FF.fmt(w.cost)} ${pn}.${w.type === 'prize' ? ' We’ll contact you to arrange your prize.' : ''}</p>
+      ${w.type === 'prize' ? '<label>Phone number</label><input id="rd-phone" type="tel" autocomplete="tel">' : ''}
+      ${FF.site.termsUrl ? `<p class="muted" style="font-size:13px">Subject to the <a href="${esc(FF.site.termsUrl)}" target="_blank" rel="noopener"><u>rewards terms</u></a>.</p>` : ''}
+      <div class="err" id="rd-err"></div>
+      <div class="row"><button class="btn" id="rd-go">Redeem</button><button class="btn ghost" id="rd-x">Cancel</button></div>`);
+    FF.$('#rd-x', m).onclick = m.close;
+    FF.$('#rd-go', m).onclick = async () => {
+      FF.$('#rd-go', m).disabled = true;
+      try {
+        const phone = FF.$('#rd-phone', m) ? FF.$('#rd-phone', m).value : '';
+        await FF.call('redeem', { rewardId: w.id, phone });
+        m.querySelector('.box').innerHTML = `<h3>Done! 🎉</h3><p class="muted">${w.type === 'prize' ? 'We’ll be in touch to arrange your prize.' : 'It’s unlocked — enjoy.'}</p><div class="row"><button class="btn" id="rd-ok">Nice</button></div>`;
+        FF.$('#rd-ok', m).onclick = m.close;
+        await loadRewards(); renderCatalogue(); loadLedger();
+      } catch (err) { FF.$('#rd-go', m).disabled = false; FF.$('#rd-err', m).textContent = FF.errText(err); }
+    };
+  };
+
+  async function loadLb() {
+    const s = await FF.db.collection('leaderboard').orderBy('lifetime', 'desc').limit(20).get();
+    const me = FF.user && FF.user.uid;
+    $('lb').innerHTML = `<tr><th>#</th><th>Fan</th><th style="text-align:right">${pn}</th></tr>` +
+      (s.docs.map((d, i) => `<tr ${d.id === me ? 'style="color:var(--brand)"' : ''}><td>${i + 1}</td><td>${esc(d.data().name)}</td><td class="num">${FF.fmt(d.data().lifetime)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">Nobody yet.</td></tr>');
+  }
+  async function loadLedger() {
+    if (!FF.profile || !FF.profile.verified) { $('mine').classList.add('hidden'); return; }
+    $('mine').classList.remove('hidden');
+    const s = await FF.db.collection(`users/${FF.user.uid}/ledger`).orderBy('at', 'desc').limit(25).get();
+    $('ledger').innerHTML = `<tr><th>When</th><th>What</th><th style="text-align:right">${pn}</th></tr>` + s.docs.map(d => {
+      const x = d.data();
+      return `<tr><td>${esc(FF.when(x.at))}</td><td>${esc(REASONS[x.reason] || x.reason)}${x.title ? ' · ' + esc(x.title) : ''}</td><td class="num ${x.amount < 0 ? 'neg' : ''}">${x.amount > 0 ? '+' : ''}${FF.fmt(x.amount)}</td></tr>`;
+    }).join('');
+  }
+
+  renderBal(); await loadRewards(); renderCatalogue(); loadLb(); loadLedger();
+  document.addEventListener('ff:profile', () => { renderBal(); renderCatalogue(); });
+  document.addEventListener('ff:auth', () => { renderBal(); renderCatalogue(); loadLedger(); });
+});
+FF.boot();
+</script>
+</body>
+</html>
