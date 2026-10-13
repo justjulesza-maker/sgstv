@@ -44,8 +44,8 @@ const BEAT_MIN_GAP_MS = 50 * 1000; // heartbeats arrive every 60s
 // ---------- helpers ----------
 const b64u = (buf) => Buffer.from(buf).toString('base64url');
 const json = (status, body) => ({ statusCode: status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }, body: JSON.stringify(body) });
-class HttpErr extends Error { constructor(status, code) { super(code); this.status = status; this.code = code; } }
-const fail = (status, code) => { throw new HttpErr(status, code); };
+class HttpErr extends Error { constructor(status, code, detail) { super(code); this.status = status; this.code = code; this.detail = detail; } }
+const fail = (status, code, detail) => { throw new HttpErr(status, code, detail); };
 const now = () => Date.now();
 const sastDay = (t = now()) => new Date(t + 2 * 3600e3).toISOString().slice(0, 10);
 
@@ -85,7 +85,12 @@ async function googleToken() {
   const claim = b64u(JSON.stringify({ iss: email, scope: 'https://www.googleapis.com/auth/datastore', aud: 'https://oauth2.googleapis.com/token', iat, exp: iat + 3600 }));
   let sig;
   try { sig = crypto.createSign('RSA-SHA256').update(head + '.' + claim).sign(key); }
-  catch (e) { console.error('private key unusable:', e.message); fail(500, 'bad_private_key'); }
+  catch (e) {
+    // Shape-only diagnostics — never echoes key material.
+    const raw = String(process.env.FIREBASE_PRIVATE_KEY || '');
+    const d = `pasted ${raw.length} chars; BEGIN ${/BEGIN PRIVATE KEY/.test(raw) ? 'found' : 'missing'}; END ${/END PRIVATE KEY/.test(raw) ? 'found' : 'missing'}; body ${(/-----BEGIN PRIVATE KEY-----([\s\S]*?)-----END/.exec(key) || ['', ''])[1].replace(/\s+/g, '').length} chars (expect ~1620)`;
+    console.error('private key unusable:', e.message, d); fail(500, 'bad_private_key', d);
+  }
   const r = await deps.fetch('https://oauth2.googleapis.com/token', {
     method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: 'grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=' + head + '.' + claim + '.' + b64u(sig),
@@ -401,7 +406,7 @@ exports.handler = async (event) => {
     const ctx = await deps.verify(auth);
     return json(200, await fn(ctx, body));
   } catch (e) {
-    if (e instanceof HttpErr) return json(e.status, { error: e.code });
+    if (e instanceof HttpErr) return json(e.status, e.detail ? { error: e.code, detail: e.detail } : { error: e.code });
     console.error(e); return json(500, { error: 'server_error', detail: String(e && e.message || e).slice(0, 160) });
   }
 };

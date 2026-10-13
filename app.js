@@ -40,7 +40,7 @@
     bad_private_key: 'Server key problem: FIREBASE_PRIVATE_KEY on Netlify is not a valid key.',
     bad_client_email_or_key: 'Server key problem: FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY don’t match.',
   };
-  FF.errText = (e) => ERRORS[e && e.code] || ((e && e.message) || 'Something went wrong.') + (e && e.detail ? ' — ' + e.detail : '');
+  FF.errText = (e) => (ERRORS[e && e.code] || (e && e.message) || 'Something went wrong.') + (e && e.detail ? ' — ' + e.detail : '');
 
   FF.call = async (action, data = {}) => {
     const u = FF.auth.currentUser;
