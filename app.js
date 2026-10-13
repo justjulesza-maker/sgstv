@@ -38,6 +38,10 @@
     already_unlocked: 'You already have this.', phone_required: 'Add a phone number so we can arrange your prize.',
     locked: 'This one is locked.', retry: 'Something changed — please try again.', server_not_configured: 'Server not configured yet (missing Netlify env vars).',
     bad_private_key: 'Server key problem: FIREBASE_PRIVATE_KEY on Netlify is not a valid key.',
+    slow_down: 'Hang on a minute before asking for another link.', bad_email: 'Enter a valid email.',
+    domain_not_authorized: 'This web address isn’t authorised in Firebase yet (Authentication → Settings → Authorized domains).',
+    email_link_disabled: 'Email-link sign-in is switched off in Firebase.', email_send_failed: 'Couldn’t send the email — check the Resend settings.',
+    'auth/quota-exceeded': 'Too many sign-in emails today — please try again tomorrow.',
     playlist_not_found: 'Playlist not found — is it public?', bad_playlist: 'That doesn’t look like a playlist link or ID.', youtube_unavailable: 'YouTube didn’t answer — try again in a minute.',
     image_too_large: 'That image is still too big after compressing — try a smaller one.', bad_image: 'That file isn’t a usable image or font (PNG, JPG, WebP, WOFF2, WOFF, TTF, OTF).', not_admin: 'Admins only.',
     bad_client_email_or_key: 'Server key problem: FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY don’t match.',
@@ -196,12 +200,15 @@
       if (!/^\S+@\S+\.\S+$/.test(email)) { FF.$('#si-err', m).textContent = 'Enter a valid email.'; return; }
       FF.$('#si-go', m).disabled = true;
       try {
-        await FF.auth.sendSignInLinkToEmail(email, { url: location.href.split('#')[0], handleCodeInApp: true });
+        const continueUrl = location.href.split('#')[0];
+        // Our server sends a branded email via Resend; if that isn't configured, fall back to Firebase's own email.
+        const r = await FF.call('sendLink', { email, continueUrl });
+        if (!r.sent) await FF.auth.sendSignInLinkToEmail(email, { url: continueUrl, handleCodeInApp: true });
         try { localStorage.setItem('ff_signin_email', email); } catch (e) {}
         m.querySelector('.box').innerHTML = `<h3>Check your inbox</h3><p class="muted">We sent a sign-in link to <b>${FF.esc(email)}</b>. Open it on this device.</p><div class="row"><button class="btn" id="si-ok">OK</button></div>`;
         FF.$('#si-ok', m).onclick = m.close;
       } catch (e) {
-        FF.$('#si-go', m).disabled = false; FF.$('#si-err', m).textContent = e.message || 'Could not send link.';
+        FF.$('#si-go', m).disabled = false; FF.$('#si-err', m).textContent = FF.errText(e) || 'Could not send link.';
       }
     };
   };

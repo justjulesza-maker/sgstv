@@ -32,6 +32,13 @@ age-verified registration and a server-enforced points system.
    - `FIREBASE_PRIVATE_KEY` = `private_key` (paste the whole thing including `-----BEGIN PRIVATE KEY-----`; the `\n`s are fine)
 3. Redeploy after adding env vars (functions only read them at deploy).
 
+### Sign-in emails (Resend)
+Firebase's free plan only sends a few sign-in emails a day. Add these Netlify env vars and the site sends its own branded emails through Resend instead (no daily cap):
+- `RESEND_API_KEY` — from the Resend account
+- `RESEND_FROM_EMAIL` — a sender on a domain verified in Resend, e.g. `Surprisingly Good Sets <hello@discovr.tv>`
+- optional `ALLOWED_HOSTS` — extra domains allowed as sign-in return addresses (comma-separated); the site's own domain is always allowed
+Without them the site falls back to Firebase's own (capped) email.
+
 ## 3. Make yourself admin
 1. Open `/admin`, sign in with your email link.
 2. It shows your user ID. In Firestore create collection `admins`, document ID = that ID, field `email` = your email.

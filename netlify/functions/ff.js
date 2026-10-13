@@ -82,7 +82,7 @@ async function googleToken() {
   if (!email || !key) fail(500, 'server_not_configured');
   const iat = Math.floor(now() / 1000);
   const head = b64u(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-  const claim = b64u(JSON.stringify({ iss: email, scope: 'https://www.googleapis.com/auth/datastore', aud: 'https://oauth2.googleapis.com/token', iat, exp: iat + 3600 }));
+  const claim = b64u(JSON.stringify({ iss: email, scope: 'https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/identitytoolkit', aud: 'https://oauth2.googleapis.com/token', iat, exp: iat + 3600 }));
   let sig;
   try { sig = crypto.createSign('RSA-SHA256').update(head + '.' + claim).sign(key); }
   catch (e) {
@@ -447,6 +447,77 @@ const deps = {
   store: () => require('@netlify/blobs').getStore('media'),
 };
 
+// ---------- sign-in emails (public, no account needed) ----------
+// Firebase creates the secure sign-in link (returnOobLink: no Firebase email, so no Spark daily cap);
+// we send it ourselves through Resend with the site's own name, logo and sender domain.
+const PUBLIC_ACTIONS = new Set(['sendLink']);
+const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex').slice(0, 40);
+
+async function throttle(key, minGapMs, maxPerHour) {
+  const path = `signin_throttle/${key}`;
+  const doc = await fsGet(path);
+  const t = now();
+  const d = doc ? doc.data : { last: 0, count: 0, windowStart: t };
+  if (t - d.last < minGapMs) return false;
+  if (t - d.windowStart > 3600e3) { d.windowStart = t; d.count = 0; }
+  if (d.count >= maxPerHour) return false;
+  return fsCommit([wSet(path, { last: t, count: d.count + 1, windowStart: d.windowStart }, pre(doc))]);
+}
+
+actions.sendLink = async (ctx, b, event) => {
+  const email = String(b.email || '').trim().toLowerCase();
+  if (!/^[^\s@]{1,64}@[^\s@]{1,190}\.[a-z]{2,}$/i.test(email)) fail(400, 'bad_email');
+  let cont;
+  try { cont = new URL(String(b.continueUrl || '')); } catch (e) { fail(400, 'bad_continue_url'); }
+  const host = String((event.headers && (event.headers.host || event.headers.Host)) || '').toLowerCase();
+  const allowed = new Set([host, ...String(process.env.ALLOWED_HOSTS || 'sgstv.netlify.app').toLowerCase().split(',').map((x) => x.trim())].filter(Boolean));
+  if (cont.protocol !== 'https:' || !allowed.has(cont.host.toLowerCase())) fail(400, 'bad_continue_url');
+  const resendKey = process.env.RESEND_API_KEY, from = process.env.RESEND_FROM_EMAIL;
+  if (!resendKey || !from) return { sent: false, fallback: true }; // site then uses Firebase's own email
+
+  const ip = String((event.headers && (event.headers['x-nf-client-connection-ip'] || event.headers['x-forwarded-for'])) || '').split(',')[0].trim();
+  if (!(await throttle('e_' + sha(email), 45e3, 6))) fail(429, 'slow_down');
+  if (ip && !(await throttle('i_' + sha(ip), 3e3, 30))) fail(429, 'slow_down');
+
+  const r = await deps.fetch(`https://identitytoolkit.googleapis.com/v1/projects/${env().project}/accounts:sendOobCode`, {
+    method: 'POST', headers: { authorization: 'Bearer ' + await googleToken(), 'content-type': 'application/json' },
+    body: JSON.stringify({ requestType: 'EMAIL_SIGNIN', email, continueUrl: cont.toString(), canHandleCodeInApp: true, returnOobLink: true }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.oobLink) {
+    const msg = (j.error && j.error.message) || '';
+    console.error('sendOobCode', r.status, msg);
+    if (/UNAUTHORIZED_DOMAIN|INVALID_CONTINUE_URI/.test(msg)) fail(400, 'domain_not_authorized');
+    if (/OPERATION_NOT_ALLOWED/.test(msg)) fail(400, 'email_link_disabled');
+    fail(502, 'link_failed', msg.slice(0, 120));
+  }
+
+  const siteDoc = await fsGet('config/site');
+  const site = (siteDoc && siteDoc.data) || {};
+  const name = site.name || 'Surprisingly Good Sets';
+  const brand = /^#[0-9a-f]{6}$/i.test(site.brand || '') ? site.brand : '#ffd23f';
+  const bg = /^#[0-9a-f]{6}$/i.test(site.bg || '') ? site.bg : '#071526';
+  const logo = site.logoUrl ? (site.logoUrl.startsWith('http') ? site.logoUrl : `${cont.origin}${site.logoUrl}`) : '';
+  const link = j.oobLink;
+  const html = `<!doctype html><html><body style="margin:0;background:${bg};font-family:Arial,Helvetica,sans-serif;color:#f3f7fb">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:${bg};padding:32px 16px"><tr><td align="center">
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:rgba(255,255,255,.06);border-radius:16px;padding:32px">
+<tr><td align="center" style="padding-bottom:20px">${logo ? `<img src="${escHtml(logo)}" alt="${escHtml(name)}" style="max-width:260px;max-height:90px">` : `<div style="font-size:24px;font-weight:bold">${escHtml(name)}</div>`}</td></tr>
+<tr><td style="font-size:18px;font-weight:bold;padding-bottom:8px">Your sign-in link</td></tr>
+<tr><td style="font-size:15px;line-height:1.5;color:#c9d6e3;padding-bottom:24px">Tap the button to sign in to ${escHtml(name)}. Open it on the same phone or computer you asked from. The link works once and expires soon.</td></tr>
+<tr><td align="center" style="padding-bottom:24px"><a href="${escHtml(link)}" style="display:inline-block;background:${brand};color:#111;text-decoration:none;font-weight:bold;padding:14px 28px;border-radius:999px">Sign in</a></td></tr>
+<tr><td style="font-size:12px;color:#8ea2b7;line-height:1.5">Didn’t ask for this? Ignore this email — nothing happens without the link.<br><br>${escHtml(site.legalLine || 'Not for sale to persons under the age of 18. Enjoy responsibly.')}</td></tr>
+</table></td></tr></table></body></html>`;
+  const text = `Sign in to ${name}:\n${link}\n\nOpen it on the same device you asked from. Didn't ask for this? Ignore this email.\n\n${site.legalLine || 'Not for sale to persons under the age of 18. Enjoy responsibly.'}`;
+  const m = await deps.fetch('https://api.resend.com/emails', {
+    method: 'POST', headers: { authorization: 'Bearer ' + resendKey, 'content-type': 'application/json' },
+    body: JSON.stringify({ from, to: [email], subject: `Sign in to ${name}`, html, text }),
+  });
+  if (!m.ok) { const e = await m.json().catch(() => ({})); console.error('resend', m.status, e); fail(502, 'email_send_failed', String(e.message || e.name || m.status).slice(0, 120)); }
+  return { sent: true };
+};
+
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'method_not_allowed' });
   let body;
@@ -455,6 +526,7 @@ exports.handler = async (event) => {
   if (!fn) return json(400, { error: 'unknown_action' });
   try {
     const auth = (event.headers.authorization || event.headers.Authorization || '').replace(/^Bearer\s+/i, '');
+    if (PUBLIC_ACTIONS.has(body.action)) return json(200, await fn({}, body, event));
     if (!auth) fail(401, 'sign_in_required');
     const ctx = await deps.verify(auth);
     ctx.event = event;
