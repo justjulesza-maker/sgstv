@@ -281,7 +281,13 @@ FF.onReady(async () => {
       $('in').onclick = () => FF.signIn('Admin access.');
       return;
     }
-    const a = await db().doc('admins/' + FF.user.uid).get().catch(() => null);
+    let a = null, denied = false;
+    try { a = await db().doc('admins/' + FF.user.uid).get(); } catch (e) { denied = e.code === 'permission-denied'; console.warn(e); }
+    if (denied) {
+      $('main').innerHTML = `<div class="box" style="max-width:560px;margin:60px auto"><h3>Firestore rules not published</h3>
+        <p class="muted">The database is refusing reads. In Firebase console → Firestore → <b>Rules</b>, paste the contents of <code>firestore.rules</code> and click <b>Publish</b>, then reload.</p></div>`;
+      return;
+    }
     if (!a || !a.exists) {
       $('main').innerHTML = `<div class="box" style="max-width:560px;margin:60px auto"><h3>Not an admin yet</h3>
         <p class="muted">In Firebase console → Firestore, create a document <code>admins/${esc(FF.user.uid)}</code> with a field <code>email</code> = <code>${esc(FF.user.email)}</code>, then reload.</p></div>`;
