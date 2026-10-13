@@ -99,7 +99,7 @@
     const logo = FF.site.logoUrl ? `<img src="${FF.esc(FF.site.logoUrl)}" alt="">` : '';
     el.className = 'ff-header';
     el.innerHTML = `<div class="wrap">
-      <a class="ff-brand" href="/">${logo}<span>${FF.esc(FF.site.name)}</span></a>
+      <a class="ff-brand" href="/" aria-label="${FF.esc(FF.site.name)}">${logo}<span class="${logo && !FF.site.showNameWithLogo ? 'sr-only' : ''}">${FF.esc(FF.site.name)}</span></a>
       <nav class="ff-nav">
         <a href="/" class="${page === 'home' ? 'on' : ''}">Home</a>
         <a href="/#channels" class="">Shows</a>
