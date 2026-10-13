@@ -5,7 +5,10 @@ const { connectLambda, getStore } = require('@netlify/blobs');
 const TYPES = { webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg' };
 
 exports.handler = async (event) => {
-  const k = String((event.queryStringParameters || {}).k || '');
+  // On a rewrite (/img/<key> → this function) Netlify passes the ORIGINAL path and query,
+  // so take the key from ?k= if present, otherwise from the last path segment.
+  const fromPath = (s) => String(s || '').split('?')[0].split('/').filter(Boolean).pop() || '';
+  const k = String((event.queryStringParameters || {}).k || fromPath(event.path) || fromPath(event.rawUrl));
   const m = /^([a-f0-9]{24})\.(webp|png|jpg)$/.exec(k);
   if (!m) return { statusCode: 404, body: 'not found' };
   connectLambda(event);
