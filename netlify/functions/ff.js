@@ -359,6 +359,18 @@ const actions = {
     return { url: '/img/' + key, bytes: buf.length };
   },
 
+  // Admin: read a public YouTube playlist (its RSS feed — no API key needed, newest ~15 videos).
+  async ytPlaylist(ctx, b) {
+    if (!(await fsGet(`admins/${ctx.uid}`))) fail(403, 'not_admin');
+    const raw = String(b.playlist || '').trim();
+    const id = ((/[?&]list=([A-Za-z0-9_-]+)/.exec(raw) || [])[1]) || raw;
+    if (!/^[A-Za-z0-9_-]{10,64}$/.test(id)) fail(400, 'bad_playlist');
+    const r = await deps.fetch('https://www.youtube.com/feeds/videos.xml?playlist_id=' + encodeURIComponent(id));
+    if (r.status === 404) fail(404, 'playlist_not_found');
+    if (!r.ok) fail(502, 'youtube_unavailable');
+    return parseYtFeed(await r.text(), id);
+  },
+
   // Admin: manual points adjustment (prize corrections, competitions run elsewhere).
   async adjust(ctx, b) {
     if (!(await fsGet(`admins/${ctx.uid}`))) fail(403, 'not_admin');
@@ -399,6 +411,18 @@ async function needUser(ctx) {
   const doc = await fsGet(`users/${ctx.uid}`);
   if (!doc || !doc.data.verified) fail(403, 'profile_required');
   return { user: doc.data, doc };
+}
+const decodeXml = (s) => String(s || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&amp;/g, '&');
+function parseYtFeed(xml, id) {
+  const head = xml.split('<entry>')[0];
+  const title = decodeXml((/<title>([\s\S]*?)<\/title>/.exec(head) || [])[1] || '');
+  const videos = xml.split('<entry>').slice(1).map((e) => ({
+    id: (/<yt:videoId>([^<]+)<\/yt:videoId>/.exec(e) || [])[1],
+    title: decodeXml((/<title>([\s\S]*?)<\/title>/.exec(e) || [])[1] || ''),
+    published: (/<published>([^<]+)<\/published>/.exec(e) || [])[1] || '',
+    description: decodeXml((/<media:description>([\s\S]*?)<\/media:description>/.exec(e) || [])[1] || '').slice(0, 1500),
+  })).filter((v) => v.id && /^[A-Za-z0-9_-]{11}$/.test(v.id));
+  return { playlistId: id, title, videos };
 }
 function sniffImage(b) {
   if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'png';

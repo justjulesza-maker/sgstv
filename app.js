@@ -38,6 +38,7 @@
     already_unlocked: 'You already have this.', phone_required: 'Add a phone number so we can arrange your prize.',
     locked: 'This one is locked.', retry: 'Something changed — please try again.', server_not_configured: 'Server not configured yet (missing Netlify env vars).',
     bad_private_key: 'Server key problem: FIREBASE_PRIVATE_KEY on Netlify is not a valid key.',
+    playlist_not_found: 'Playlist not found — is it public?', bad_playlist: 'That doesn’t look like a playlist link or ID.', youtube_unavailable: 'YouTube didn’t answer — try again in a minute.',
     image_too_large: 'That image is still too big after compressing — try a smaller one.', bad_image: 'That file isn’t a usable image or font (PNG, JPG, WebP, WOFF2, WOFF, TTF, OTF).', not_admin: 'Admins only.',
     bad_client_email_or_key: 'Server key problem: FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY don’t match.',
   };

@@ -170,9 +170,9 @@ const REWARD = [
 
 // ---------- tabs ----------
 let channels = [];
-const TABS = { site: tabSite, rules: tabRules, channels: tabChannels, videos: tabVideos, rewards: tabRewards, redemptions: tabRedemptions, users: tabUsers };
+const TABS = { site: tabSite, rules: tabRules, channels: tabChannels, videos: tabVideos, import: tabImport, rewards: tabRewards, redemptions: tabRedemptions, users: tabUsers };
 function shell() {
-  $('main').innerHTML = `<div class="tabs" id="tabs">${['site', 'rules', 'channels', 'videos', 'rewards', 'redemptions', 'users'].map(t => `<button data-t="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div><div id="tab"></div>`;
+  $('main').innerHTML = `<div class="tabs" id="tabs">${['site', 'rules', 'channels', 'videos', 'import', 'rewards', 'redemptions', 'users'].map(t => `<button data-t="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div><div id="tab"></div>`;
   $('tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) go(b.dataset.t); };
   go(location.hash.slice(1) || 'videos');
 }
@@ -277,6 +277,70 @@ async function tabVideos() {
     },
     del: async (id) => { await db().doc('videos_private/' + id).delete(); await db().doc('videos/' + id).delete(); },
   });
+}
+
+// ---------- import from YouTube ----------
+// The Surprisingly Good Sets playlists on the Flying Fish SA channel (Oct 2026). One playlist = one show.
+const SGS_PLAYLISTS = `PLNOaijkgwOgQ
+PLSW73I2QK9lc
+PLbklkI4XSOihNW19uAJqJIaIM5xAXpPG2
+PLbklkI4XSOigBpPJiaHB3OtET2m5tLt8U
+PLbklkI4XSOiiRgVL7_N2knev1TNm1DwdB
+PLbklkI4XSOih6ujbxGrERCpI3Ww0wFQOj
+PLbklkI4XSOih1ltlTa-XJTDPlNeeCciar
+PLbklkI4XSOigqCHJLiVD093vBHicbqHkr
+PLbklkI4XSOigOML_QV2SMLTKAiCmCgmEJ
+PLbklkI4XSOiiKXxMpZqzgrU1oqAXbh7WV`;
+const SHOW_COLOURS = ['#0f6e8c', '#c2410c', '#6d28d9', '#047857', '#b91c1c', '#1d4ed8', '#a16207', '#be185d', '#0e7490', '#4d7c0f'];
+const showName = (t) => t.replace(/^\s*Surprisingly Good (Sets|Series)\s*[|:–-]\s*/i, '').replace(/\s{2,}/g, ' ').trim() || t;
+const slugify = (s) => s.toLowerCase().replace(/[™®]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+
+async function tabImport() {
+  $('tab').innerHTML = `<div class="box"><h3>Import shows from YouTube</h3>
+    <p class="muted">One playlist per line (link or ID). Each playlist becomes a show; its videos become episodes. Running it again only adds new videos — nothing is duplicated or overwritten.</p>
+    <textarea id="pl" rows="11">${esc(SGS_PLAYLISTS)}</textarea>
+    <label class="check"><input type="checkbox" id="pub" checked> <span>Publish imported videos immediately</span></label>
+    <label class="check"><input type="checkbox" id="art" checked> <span>Use each show’s newest video thumbnail as its card image</span></label>
+    <div class="row" style="margin-top:12px"><button class="btn" id="go">Import</button></div>
+    <div id="log" style="margin-top:16px;font-size:14px;line-height:1.7"></div></div>`;
+  $('go').onclick = async () => {
+    const lines = $('pl').value.split(/\n+/).map(s => s.trim()).filter(Boolean);
+    const log = (h) => { $('log').insertAdjacentHTML('beforeend', `<div>${h}</div>`); };
+    $('go').disabled = true; $('log').innerHTML = '';
+    const existing = (await db().collection('videos').where('type', '==', 'youtube').get()).docs.map(d => d.data().sourceId);
+    const have = new Set(existing);
+    let order = channels.length, totalNew = 0;
+    for (const line of lines) {
+      try {
+        const feed = await FF.call('ytPlaylist', { playlist: line });
+        const name = showName(feed.title || 'Untitled show');
+        let ch = channels.find(c => c.ytPlaylistId === feed.playlistId) || channels.find(c => c.name.toLowerCase() === name.toLowerCase());
+        const batch = db().batch();
+        if (!ch) {
+          const ref = db().collection('channels').doc();
+          ch = { id: ref.id, name, slug: slugify(name), tagline: '', description: '', color: SHOW_COLOURS[order % SHOW_COLOURS.length], order: ++order, active: true, ytPlaylistId: feed.playlistId };
+          if (channels.some(c => c.slug === ch.slug)) ch.slug += '-' + ref.id.slice(0, 4).toLowerCase();
+          if ($('art').checked && feed.videos[0]) ch.cardImage = `https://i.ytimg.com/vi/${feed.videos[0].id}/maxresdefault.jpg`;
+          const { id, ...data } = ch; batch.set(ref, data); channels.push(ch);
+        } else if (!ch.ytPlaylistId) batch.set(db().doc('channels/' + ch.id), { ytPlaylistId: feed.playlistId }, { merge: true });
+        let added = 0;
+        for (const v of feed.videos) {
+          if (have.has(v.id)) continue;
+          have.add(v.id); added++;
+          batch.set(db().collection('videos').doc(), {
+            title: v.title, channelId: ch.id, type: 'youtube', sourceId: v.id, description: v.description,
+            published: $('pub').checked, isLive: false, locked: false,
+            publishedAt: v.published ? new Date(v.published) : new Date(),
+          });
+        }
+        await batch.commit();
+        totalNew += added;
+        log(`✓ <b>${esc(name)}</b> — ${added} new episode${added === 1 ? '' : 's'}${feed.videos.length - added ? `, ${feed.videos.length - added} already here` : ''}`);
+      } catch (e) { log(`✕ ${esc(line)} — ${esc(FF.errText(e))}`); }
+    }
+    log(`<br><b>Done — ${totalNew} episodes added.</b> Check them in the Videos and Channels tabs; add show logos there.`);
+    $('go').disabled = false;
+  };
 }
 
 async function tabRewards() {
