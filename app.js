@@ -38,6 +38,7 @@
     already_unlocked: 'You already have this.', phone_required: 'Add a phone number so we can arrange your prize.',
     locked: 'This one is locked.', retry: 'Something changed — please try again.', server_not_configured: 'Server not configured yet (missing Netlify env vars).',
     bad_private_key: 'Server key problem: FIREBASE_PRIVATE_KEY on Netlify is not a valid key.',
+    image_too_large: 'That image is still too big after compressing — try a smaller one.', bad_image: 'That file isn’t a usable image.', not_admin: 'Admins only.',
     bad_client_email_or_key: 'Server key problem: FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY don’t match.',
   };
   FF.errText = (e) => (ERRORS[e && e.code] || (e && e.message) || 'Something went wrong.') + (e && e.detail ? ' — ' + e.detail : '');
@@ -245,6 +246,38 @@
       if (d.awarded) FF.earned(d.awarded, d.streak > 1 ? `${d.streak}-day streak` : 'daily visit');
     } catch (e) { /* not fatal */ }
   }
+
+  // ---------- backgrounds ----------
+  // strength: 'light' (home), 'medium' (show pages), 'heavy' (watch/rewards — content first)
+  FF.setBackdrop = (url, strength = 'medium') => {
+    let el = document.querySelector('.ff-backdrop');
+    if (!url) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement('div'); el.className = 'ff-backdrop'; document.body.prepend(el); }
+    const shade = { light: [25, 65], medium: [45, 78], heavy: [72, 88] }[strength] || [45, 78];
+    el.style.setProperty('--shade-top', shade[0] + '%');
+    el.style.setProperty('--shade-mid', shade[1] + '%');
+    el.style.backgroundImage = `url("${String(url).replace(/["\\\n]/g, '')}")`;
+  };
+
+  // ---------- image upload (admin) ----------
+  // Resizes in the browser so a 12 MB phone photo becomes a ~200 KB WebP before it leaves the device.
+  FF.uploadImage = async (file, { max = 1200, kind = 'image' } = {}) => {
+    if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type)) throw Object.assign(new Error('Use a PNG, JPG, WebP or SVG image.'), {});
+    const src = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Could not read that image.')); i.src = src; });
+      let w = img.naturalWidth || 1200, h = img.naturalHeight || 800;
+      const scale = Math.min(1, max / Math.max(w, h)); w = Math.round(w * scale); h = Math.round(h * scale);
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      const toBlob = (type, q) => new Promise((res) => c.toBlob(res, type, q));
+      let blob = await toBlob('image/webp', 0.84);
+      if (!blob || blob.type !== 'image/webp') blob = await toBlob(kind === 'bg' ? 'image/jpeg' : 'image/png', 0.85); // older Safari
+      const data = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.readAsDataURL(blob); });
+      const out = await FF.call('upload', { data, kind });
+      return out.url;
+    } finally { URL.revokeObjectURL(src); }
+  };
 
   // ---------- media helpers ----------
   FF.thumbHtml = (v, ch) => {

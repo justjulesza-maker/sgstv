@@ -5,3 +5,9 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+
+# Uploaded logos/backgrounds live in Netlify Blobs and are served (and CDN-cached) from /img/<key>
+[[redirects]]
+  from = "/img/*"
+  to = "/.netlify/functions/img?k=:splat"
+  status = 200

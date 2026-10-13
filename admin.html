@@ -42,6 +42,10 @@ const toLocal = (v) => { const t = FF.ms(v); if (!t) return ''; const d = new Da
 function fieldHtml(f, val) {
   const id = 'f_' + f.k, cls = f.full ? 'full' : '';
   const hint = f.hint ? `<div class="hint">${f.hint}</div>` : '';
+  if (f.t === 'image') return `<div class="${cls}"><label>${esc(f.l)}</label><div class="img-field">
+    <span class="prev ${f.kind === 'bg' ? 'bg' : ''}" id="pv_${f.k}" style="${val ? `background-image:url('${esc(val)}')` : ''}"></span>
+    <input type="text" id="${id}" value="${esc(val || '')}" placeholder="Upload, or paste an https link">
+    <button type="button" class="btn ghost small up-btn" data-k="${f.k}" data-max="${f.max || 1200}" data-kind="${f.kind || 'image'}">Upload</button></div>${hint}</div>`;
   if (f.t === 'check') return `<label class="check ${cls}"><input type="checkbox" id="${id}" ${val ? 'checked' : ''}> <span>${esc(f.l)}</span></label>`;
   if (f.t === 'textarea') return `<div class="${cls}"><label>${esc(f.l)}</label><textarea id="${id}" rows="3">${esc(val || '')}</textarea>${hint}</div>`;
   if (f.t === 'select') return `<div class="${cls}"><label>${esc(f.l)}</label><select id="${id}">${f.opts.map(o => `<option value="${esc(o[0])}" ${o[0] === val ? 'selected' : ''}>${esc(o[1])}</option>`).join('')}</select>${hint}</div>`;
@@ -62,10 +66,33 @@ function readFields(fields) {
   return o;
 }
 
+// ---------- upload buttons (any image field) ----------
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('.up-btn'); if (!b) return;
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/png,image/jpeg,image/webp,image/svg+xml,image/gif';
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0]; if (!f) return;
+    const label = b.textContent; b.disabled = true; b.textContent = 'Uploading…';
+    try {
+      const url = await FF.uploadImage(f, { max: Number(b.dataset.max), kind: b.dataset.kind });
+      $('f_' + b.dataset.k).value = url;
+      $('pv_' + b.dataset.k).style.backgroundImage = `url('${url}')`;
+      FF.toast('Uploaded — remember to Save');
+    } catch (err) { FF.toast(FF.errText(err)); }
+    finally { b.disabled = false; b.textContent = label; }
+  };
+  inp.click();
+});
+document.addEventListener('input', (e) => {
+  const i = e.target; if (!i.id || !i.id.startsWith('f_')) return;
+  const pv = $('pv_' + i.id.slice(2)); if (pv) pv.style.backgroundImage = i.value ? `url('${i.value.replace(/'/g, '')}')` : '';
+});
+
 // ---------- schemas ----------
 const SITE = [
   { k: 'name', l: 'Site name' }, { k: 'tagline', l: 'Tagline' },
-  { k: 'logoUrl', l: 'Main logo URL', full: true, hint: 'Upload to Bunny Storage (or any https host) and paste the link.' },
+  { k: 'logoUrl', l: 'Main logo', t: 'image', max: 800, kind: 'logo', full: true, hint: 'PNG with transparency works best. Shown in the header.' },
+  { k: 'bgImage', l: 'Main page background', t: 'image', max: 2400, kind: 'bg', full: true, hint: 'Landscape, at least 1920px wide. Fades into the background colour so text stays readable.' },
   { k: 'bg', l: 'Background colour', t: 'color' }, { k: 'brand', l: 'Primary accent', t: 'color' },
   { k: 'accent', l: 'Secondary accent', t: 'color' }, { k: 'pointsName', l: 'Points name', hint: 'e.g. Fish Points' },
   { k: 'featuredVideoId', l: 'Featured video ID (home hero)', hint: 'Live videos always take the hero.' },
@@ -89,7 +116,9 @@ const RULES = [
 const CHANNEL = [
   { k: 'name', l: 'Show name' }, { k: 'slug', l: 'URL slug', hint: 'e.g. sgs-durban → /channel.html?c=sgs-durban' },
   { k: 'tagline', l: 'Tagline', full: true }, { k: 'description', l: 'Description', t: 'textarea', full: true },
-  { k: 'logoUrl', l: 'Show logo URL', full: true },
+  { k: 'logoUrl', l: 'Show logo', t: 'image', max: 800, kind: 'logo', full: true },
+  { k: 'bgImage', l: 'Show page background', t: 'image', max: 2400, kind: 'bg', full: true, hint: 'Used on this show’s page and its videos. Blank = main background.' },
+  { k: 'cardImage', l: 'Show card image (home page)', t: 'image', max: 1200, kind: 'bg', full: true, hint: 'Optional photo behind the show card; logo sits on top.' },
   { k: 'color', l: 'Show colour', t: 'color' }, { k: 'accent', l: 'Accent override (optional)', t: 'text', hint: 'Hex, blank = site accent' },
   { k: 'order', l: 'Order', t: 'number' }, { k: 'active', l: 'Visible on site', t: 'check' },
 ];
@@ -103,7 +132,7 @@ const VIDEO = (chs) => [
   { k: 'cfCustomerCode', l: 'Cloudflare customer code (optional)', hint: 'The xyz in customer-xyz.cloudflarestream.com' },
   { k: 'durationMin', l: 'Duration (min)', t: 'number' },
   { k: 'description', l: 'Description', t: 'textarea', full: true },
-  { k: 'thumb', l: 'Thumbnail URL', full: true, hint: 'YouTube fills this in automatically if left blank.' },
+  { k: 'thumb', l: 'Thumbnail', t: 'image', max: 1280, kind: 'thumb', full: true, hint: 'YouTube fills this in automatically if left blank.' },
   { k: 'scheduledAt', l: 'Scheduled start (live)', t: 'datetime' }, { k: 'publishedAt', l: 'Published date', t: 'datetime' },
   { k: 'published', l: 'Published', t: 'check' }, { k: 'isLive', l: 'LIVE NOW', t: 'check' },
   { k: 'locked', l: 'Fan exclusive (unlock with points)', t: 'check' }, { k: 'unlockKey', l: 'Unlock key', hint: 'Must match a reward’s unlock key, e.g. vault:sgs-1' },
@@ -114,7 +143,7 @@ const REWARD = [
   { k: 'cost', l: 'Cost (points)', t: 'number' },
   { k: 'unlockKey', l: 'Unlock key', hint: '<code>pack:KEY</code> for emoji packs, or any key used on locked videos' },
   { k: 'stock', l: 'Stock (blank = unlimited)', t: 'number' },
-  { k: 'image', l: 'Image URL', full: true }, { k: 'active', l: 'Visible', t: 'check' },
+  { k: 'image', l: 'Image', t: 'image', max: 1000, kind: 'reward', full: true }, { k: 'active', l: 'Visible', t: 'check' },
 ];
 
 // ---------- tabs ----------

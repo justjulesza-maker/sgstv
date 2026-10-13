@@ -1,0 +1,8 @@
+{
+  "name": "sgstv",
+  "private": true,
+  "description": "Surprisingly Good Sets — Flying Fish",
+  "dependencies": {
+    "@netlify/blobs": "^11.1.4"
+  }
+}

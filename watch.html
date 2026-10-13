@@ -72,6 +72,7 @@ FF.onReady(async () => {
   document.title = `${video.title} · ${FF.site.name}`;
   $('stage').style.setProperty('--c', ch.color || '');
   if (ch.accent) document.documentElement.style.setProperty('--brand', ch.accent);
+  FF.setBackdrop(ch.bgImage || FF.site.bgImage, 'heavy');
   const pn = FF.site.pointsName;
 
   function renderMeta() {

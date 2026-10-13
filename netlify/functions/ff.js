@@ -345,6 +345,20 @@ const actions = {
     return { source: p.data };
   },
 
+  // Admin: upload a logo/background/thumbnail (browser has already resized + compressed it).
+  async upload(ctx, b) {
+    if (!(await fsGet(`admins/${ctx.uid}`))) fail(403, 'not_admin');
+    const buf = Buffer.from(String(b.data || ''), 'base64');
+    if (buf.length < 64) fail(400, 'bad_image');
+    if (buf.length > 3.5 * 1024 * 1024) fail(400, 'image_too_large');
+    const ext = sniffImage(buf);
+    if (!ext) fail(400, 'bad_image'); // PNG, JPEG or WebP only (no SVG: it can carry script)
+    const key = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 24) + '.' + ext;
+    deps.blobs(ctx.event);
+    await deps.store().set(key, buf, { metadata: { by: ctx.uid, at: Date.now(), kind: String(b.kind || '').slice(0, 20) } });
+    return { url: '/img/' + key, bytes: buf.length };
+  },
+
   // Admin: manual points adjustment (prize corrections, competitions run elsewhere).
   async adjust(ctx, b) {
     if (!(await fsGet(`admins/${ctx.uid}`))) fail(403, 'not_admin');
@@ -386,13 +400,23 @@ async function needUser(ctx) {
   if (!doc || !doc.data.verified) fail(403, 'profile_required');
   return { user: doc.data, doc };
 }
+function sniffImage(b) {
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'png';
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'jpg';
+  if (b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP') return 'webp';
+  return null;
+}
 function cleanId(s) { s = String(s || ''); if (!/^[A-Za-z0-9_-]{1,128}$/.test(s)) fail(400, 'bad_id'); return s; }
 function publicProfile(u) {
   return { name: u.name, email: u.email, verified: !!u.verified, points: u.points || 0, lifetime: u.lifetime || 0,
     streak: u.streak || 0, lastDaily: u.lastDaily || '', unlocks: u.unlocks || [], marketing: !!u.marketing };
 }
 
-const deps = { fetch: (...a) => fetch(...a), verify: verifyIdToken };
+const deps = {
+  fetch: (...a) => fetch(...a), verify: verifyIdToken,
+  blobs: (event) => require('@netlify/blobs').connectLambda(event),
+  store: () => require('@netlify/blobs').getStore('media'),
+};
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'method_not_allowed' });
@@ -404,6 +428,7 @@ exports.handler = async (event) => {
     const auth = (event.headers.authorization || event.headers.Authorization || '').replace(/^Bearer\s+/i, '');
     if (!auth) fail(401, 'sign_in_required');
     const ctx = await deps.verify(auth);
+    ctx.event = event;
     return json(200, await fn(ctx, body));
   } catch (e) {
     if (e instanceof HttpErr) return json(e.status, e.detail ? { error: e.code, detail: e.detail } : { error: e.code });

@@ -15,7 +15,11 @@
   .hero p { color: #d6e2ee; font-size: 18px; margin: 0 0 20px; }
   .ch-card { position: relative; border-radius: 18px; overflow: hidden; aspect-ratio: 4/3; background: linear-gradient(150deg, var(--c), color-mix(in srgb, var(--c) 30%, var(--bg))); display: flex; flex-direction: column; justify-content: flex-end; padding: 18px; border: 1px solid var(--line); transition: transform .15s; }
   .ch-card:hover { transform: translateY(-4px) rotate(-.4deg); }
-  .ch-card img { position: absolute; top: 18px; left: 18px; max-height: 42%; max-width: 60%; object-fit: contain; }
+  .ch-card.has-img { background: linear-gradient(0deg, color-mix(in srgb, var(--c) 92%, #000) 8%, color-mix(in srgb, var(--c) 35%, transparent) 60%, transparent), var(--img) center/cover; }
+  .hero.clear { background: transparent; border: 1px solid var(--line); }
+  .hero.clear .bg::after { background: linear-gradient(90deg, rgba(0,0,0,.35), transparent 70%); }
+  .ch-card img { position: absolute; z-index: 1; top: 18px; left: 18px; max-height: 42%; max-width: 60%; object-fit: contain; }
+  .ch-card .n, .ch-card .tg { position: relative; z-index: 1; }
   .ch-card .n { font-family: var(--display); font-weight: 800; font-size: 24px; line-height: 1.05; }
   .ch-card .tg { color: rgba(255,255,255,.82); font-size: 14px; }
   .ch-card .live-dot { position: absolute; top: 16px; right: 16px; left: auto; }
@@ -64,6 +68,7 @@
 FF.onReady(async () => {
   const esc = FF.esc;
   document.title = FF.site.name;
+  FF.setBackdrop(FF.site.bgImage, 'light');
   const channels = await FF.loadChannels();
   const byId = Object.fromEntries(channels.map(c => [c.id, c]));
   const videos = (await FF.publishedVideos()).filter(v => byId[v.channelId]);
@@ -75,7 +80,8 @@ FF.onReady(async () => {
   if (hero) {
     const ch = byId[hero.channelId] || {};
     const bg = hero.heroImage || hero.thumb || (hero.type === 'youtube' ? `https://i.ytimg.com/vi/${encodeURIComponent(hero.sourceId)}/maxresdefault.jpg` : '');
-    h.innerHTML = `<div class="bg" style="${bg ? `background-image:url('${esc(bg)}')` : `background:linear-gradient(135deg,${esc(ch.color || '#15304d')},var(--bg))`}"></div>
+    h.classList.toggle('clear', !bg && !!FF.site.bgImage);
+    h.innerHTML = `<div class="bg" style="${bg ? `background-image:url('${esc(bg)}')` : FF.site.bgImage ? '' : `background:linear-gradient(135deg,${esc(ch.color || '#15304d')},var(--bg))`}"></div>
       <div class="in">${hero.isLive ? '<span class="kicker live">● Live now</span>' : `<span class="kicker">${esc(ch.name || 'Featured')}</span>`}
       <h1>${esc(hero.title)}</h1><p>${esc(hero.description || FF.site.tagline)}</p>
       <a class="btn" href="/watch.html?v=${encodeURIComponent(hero.id)}">${hero.isLive ? 'Watch live' : 'Watch now'} ▸</a></div>`;
@@ -84,7 +90,7 @@ FF.onReady(async () => {
   }
 
   document.getElementById('ch-grid').innerHTML = channels.length ? channels.map(c => `
-    <a class="ch-card" style="--c:${esc(c.color || '#1d4e7a')}" href="/channel.html?c=${encodeURIComponent(c.slug || c.id)}">
+    <a class="ch-card ${c.cardImage ? 'has-img' : ''}" style="--c:${esc(c.color || '#1d4e7a')};${c.cardImage ? `--img:url('${esc(c.cardImage)}')` : ''}" href="/channel.html?c=${encodeURIComponent(c.slug || c.id)}">
       ${c.logoUrl ? `<img src="${esc(c.logoUrl)}" alt="">` : ''}
       ${liveIds.has(c.id) ? '<span class="badge live live-dot">● LIVE</span>' : ''}
       <div class="n">${esc(c.name)}</div><div class="tg">${esc(c.tagline || '')}</div></a>`).join('')

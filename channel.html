@@ -5,6 +5,7 @@
 <title>Show</title>
 <link rel="stylesheet" href="/app.css">
 <style>
+  .ch-hero.over-bg { background: linear-gradient(140deg, color-mix(in srgb, var(--c) 80%, transparent), color-mix(in srgb, var(--bg) 55%, transparent)); backdrop-filter: blur(2px); }
   .ch-hero { margin-top: 24px; border-radius: 22px; padding: clamp(22px, 4vw, 44px); background: linear-gradient(140deg, var(--c), color-mix(in srgb, var(--c) 25%, var(--bg))); display: grid; gap: 24px; align-items: center; grid-template-columns: 1fr; border: 1px solid var(--line); }
   @media (min-width: 760px) { .ch-hero { grid-template-columns: auto 1fr; } }
   .ch-hero img { max-height: 140px; max-width: 260px; object-fit: contain; }
@@ -31,12 +32,13 @@ FF.onReady(async () => {
   if (!ch) { main.innerHTML = '<div class="empty" style="margin-top:40px">Show not found. <a href="/"><u>Back home</u></a></div>'; return; }
   document.title = `${ch.name} · ${FF.site.name}`;
   if (ch.accent) document.documentElement.style.setProperty('--brand', ch.accent);
+  FF.setBackdrop(ch.bgImage || FF.site.bgImage, 'medium');
   const vids = await FF.publishedVideos(ch.id);
   const live = vids.filter(v => v.isLive);
   const upcoming = vids.filter(v => !v.isLive && v.scheduledAt && FF.ms(v.scheduledAt) > Date.now()).sort((a, b) => FF.ms(a.scheduledAt) - FF.ms(b.scheduledAt));
   const eps = vids.filter(v => !v.isLive && !upcoming.includes(v));
   main.innerHTML = `
-    <section class="ch-hero" style="--c:${esc(ch.color || '#1d4e7a')}">
+    <section class="ch-hero ${ch.bgImage || FF.site.bgImage ? 'over-bg' : ''}" style="--c:${esc(ch.color || '#1d4e7a')}">
       ${ch.logoUrl ? `<img src="${esc(ch.logoUrl)}" alt="${esc(ch.name)}">` : ''}
       <div><h1>${esc(ch.name)}</h1>${ch.tagline ? `<p><b>${esc(ch.tagline)}</b></p>` : ''}${ch.description ? `<p>${esc(ch.description)}</p>` : ''}</div>
     </section>

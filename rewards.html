@@ -42,6 +42,7 @@
 FF.onReady(async () => {
   const esc = FF.esc, $ = (id) => document.getElementById(id), pn = esc(FF.site.pointsName);
   document.title = `Rewards · ${FF.site.name}`;
+  FF.setBackdrop(FF.site.bgImage, 'heavy');
   const R = () => Object.assign({ redemptionsOpen: false, prizesEnabled: false }, FF.rules);
   const REASONS = { welcome: 'Welcome bonus', daily: 'Daily visit', watch: 'Watching', live_attend: 'Showed up live', chat: 'Chat', react: 'Reaction', redeem: 'Redeemed', admin: 'Adjustment' };
 
