@@ -8,8 +8,9 @@ exports.handler = async (event) => {
   // On a rewrite (/img/<key> → this function) Netlify passes the ORIGINAL path and query,
   // so take the key from ?k= if present, otherwise from the last path segment.
   const fromPath = (s) => String(s || '').split('?')[0].split('/').filter(Boolean).pop() || '';
-  const k = String((event.queryStringParameters || {}).k || fromPath(event.path) || fromPath(event.rawUrl));
-  const m = /^([a-f0-9]{24})\.(webp|png|jpg)$/.exec(k);
+  const RE = /^([a-f0-9]{24})\.(webp|png|jpg)$/;
+  const k = [(event.queryStringParameters || {}).k, fromPath(event.path), fromPath(event.rawUrl)].map((x) => String(x || '')).find((x) => RE.test(x)) || '';
+  const m = RE.exec(k);
   if (!m) return { statusCode: 404, body: 'not found' };
   connectLambda(event);
   const data = await getStore('media').get(k, { type: 'arrayBuffer' });
