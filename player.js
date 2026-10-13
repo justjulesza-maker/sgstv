@@ -19,7 +19,7 @@
     const markReady = () => { ready = true; if (st === 'unknown') st = 'paused'; };
     const on = (s) => { ready = true; st = s; };
     el.innerHTML = '';
-    el.style.position = 'relative';
+    if (getComputedStyle(el).position === 'static') el.style.position = 'relative'; // never undo an absolute holder (that collapsed it to 0px tall)
     const id = encodeURIComponent(src.sourceId || '');
 
     // If the provider never says it is ready, fall back to 'unknown' (counts only while tab is visible).
