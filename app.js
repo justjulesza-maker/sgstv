@@ -36,9 +36,11 @@
     redemptions_closed: 'Redemptions open soon.', prizes_closed: 'Prize redemptions aren’t open yet.',
     not_enough_points: 'Not enough points yet.', out_of_stock: 'That reward is out of stock.',
     already_unlocked: 'You already have this.', phone_required: 'Add a phone number so we can arrange your prize.',
-    locked: 'This one is locked.', retry: 'Something changed — please try again.', server_not_configured: 'Server not configured yet.',
+    locked: 'This one is locked.', retry: 'Something changed — please try again.', server_not_configured: 'Server not configured yet (missing Netlify env vars).',
+    bad_private_key: 'Server key problem: FIREBASE_PRIVATE_KEY on Netlify is not a valid key.',
+    bad_client_email_or_key: 'Server key problem: FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY don’t match.',
   };
-  FF.errText = (e) => ERRORS[e && e.code] || (e && e.message) || 'Something went wrong.';
+  FF.errText = (e) => ERRORS[e && e.code] || ((e && e.message) || 'Something went wrong.') + (e && e.detail ? ' — ' + e.detail : '');
 
   FF.call = async (action, data = {}) => {
     const u = FF.auth.currentUser;
@@ -49,7 +51,7 @@
       body: JSON.stringify(Object.assign({ action }, data)),
     });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) { const e = new Error(j.error || 'request_failed'); e.code = j.error; throw e; }
+    if (!r.ok) { const e = new Error(j.error || 'request_failed'); e.code = j.error; e.detail = j.detail; throw e; }
     return j;
   };
 

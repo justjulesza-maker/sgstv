@@ -7,10 +7,23 @@
 //   FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY
 const crypto = require('crypto');
 
+// Accepts the private key however it was pasted into Netlify: with literal \n, with real
+// line breaks, wrapped in quotes, with a trailing comma, or even the whole service-account JSON.
+function cleanKey(raw) {
+  let k = String(raw || '').trim();
+  if (k.startsWith('{')) { try { k = JSON.parse(k).private_key || ''; } catch (e) { /* fall through */ } }
+  k = k.replace(/,\s*$/, '').trim();
+  if ((k.startsWith('"') && k.endsWith('"')) || (k.startsWith("'") && k.endsWith("'"))) k = k.slice(1, -1);
+  k = k.replace(/\\r/g, '').replace(/\\n/g, '\n').replace(/\r/g, '');
+  const m = /-----BEGIN PRIVATE KEY-----([\s\S]*?)-----END PRIVATE KEY-----/.exec(k);
+  if (!m) return k;
+  const body = m[1].replace(/\s+/g, '').match(/.{1,64}/g) || [];
+  return `-----BEGIN PRIVATE KEY-----\n${body.join('\n')}\n-----END PRIVATE KEY-----\n`;
+}
 const env = () => ({
-  project: process.env.FIREBASE_PROJECT_ID,
-  email: process.env.FIREBASE_CLIENT_EMAIL,
-  key: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
+  project: (process.env.FIREBASE_PROJECT_ID || '').trim().replace(/^"|"$/g, ''),
+  email: (process.env.FIREBASE_CLIENT_EMAIL || '').trim().replace(/^"|"$/g, ''),
+  key: cleanKey(process.env.FIREBASE_PRIVATE_KEY),
 });
 const docsBase = () => `https://firestore.googleapis.com/v1/projects/${env().project}/databases/(default)/documents`;
 const docName = (path) => `projects/${env().project}/databases/(default)/documents/${path}`;
@@ -70,13 +83,15 @@ async function googleToken() {
   const iat = Math.floor(now() / 1000);
   const head = b64u(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
   const claim = b64u(JSON.stringify({ iss: email, scope: 'https://www.googleapis.com/auth/datastore', aud: 'https://oauth2.googleapis.com/token', iat, exp: iat + 3600 }));
-  const sig = crypto.createSign('RSA-SHA256').update(head + '.' + claim).sign(key);
+  let sig;
+  try { sig = crypto.createSign('RSA-SHA256').update(head + '.' + claim).sign(key); }
+  catch (e) { console.error('private key unusable:', e.message); fail(500, 'bad_private_key'); }
   const r = await deps.fetch('https://oauth2.googleapis.com/token', {
     method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: 'grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=' + head + '.' + claim + '.' + b64u(sig),
   });
   const j = await r.json();
-  if (!r.ok || !j.access_token) { console.error('token error', j); fail(500, 'server_auth_failed'); }
+  if (!r.ok || !j.access_token) { console.error('token error', j); fail(500, j.error === 'invalid_grant' ? 'bad_client_email_or_key' : 'server_auth_failed'); }
   tokenCache = { t: j.access_token, exp: now() + (j.expires_in || 3600) * 1000 };
   return tokenCache.t;
 }
@@ -387,7 +402,7 @@ exports.handler = async (event) => {
     return json(200, await fn(ctx, body));
   } catch (e) {
     if (e instanceof HttpErr) return json(e.status, { error: e.code });
-    console.error(e); return json(500, { error: 'server_error' });
+    console.error(e); return json(500, { error: 'server_error', detail: String(e && e.message || e).slice(0, 160) });
   }
 };
 exports._deps = deps;
